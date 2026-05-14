@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Metadata Eval Viewer</title>
+    <link href="eval_viewer.css" rel="stylesheet">
+</head>
+<body>
+<header>
+    <h1>Metadata Eval Viewer</h1>
+    <label class="file-btn">
+        Load results…
+        <input accept=".json" hidden id="file" type="file">
+    </label>
+    <button class="run-btn" id="run-toggle" type="button">Run new eval…</button>
+    <button class="run-btn" disabled id="save-results" type="button">Save results…</button>
+    <div class="meta-strip" id="meta"></div>
+    <div class="run-panel" hidden id="run-panel">
+        <label>Backend URL
+            <input id="run-backend" placeholder="http://localhost:8000" type="text">
+        </label>
+        <label>Datasets
+            <input id="run-limit" max="200" min="1" type="number" value="5">
+        </label>
+        <label class="run-check">
+            <input checked id="run-eval-columns" type="checkbox">
+            evaluate columns
+        </label>
+        <label>Max cols/dataset
+            <input id="run-max-cols" max="100" min="1" type="number" value="8">
+        </label>
+        <button class="run-btn run-go" id="run-start" type="button">Run</button>
+        <button class="run-btn run-cancel" hidden id="run-cancel" type="button">Cancel</button>
+        <div class="run-status" id="run-status"></div>
+    </div>
+</header>
+<main id="main">
+    <div class="empty">
+        Load a result JSON file, or click <b>Run new eval…</b> to start one against the backend.
+    </div>
+</main>
+<script defer src="eval_viewer.js"></script>
+</body>
+</html>
