@@ -68,7 +68,7 @@ fileInput.addEventListener("change", async (e) => {
 
 // --- Run-new-eval panel (talks to /api/eval/run on the backend) ----------------
 const RUN_DEFAULTS = {
-  backend: "http://localhost:8000",
+  backend: "http://localhost:8001",
   limit: 5,
   evalColumns: true,
   maxCols: 8,
@@ -162,7 +162,7 @@ runStart.addEventListener("click", async () => {
       signal: _runController.signal,
     });
   } catch (err) {
-    setRunStatus(`Network error: ${err.message}. Is the backend running with ENABLE_EVAL=1?`, true);
+    setRunStatus(`Network error: ${err.message}. Is the eval backend running? (python -m eval.main)`, true);
     setRunning(false);
     _runController = null;
     return;
