@@ -462,6 +462,98 @@ details.columns summary:hover {
     font-weight: 400;
 }
 
+/* Per-model sub-block inside a dataset card (multi-generator runs) */
+.model-eval {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.model-eval-head {
+    margin: 0 0 12px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.model-eval-name {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 600;
+    color: var(--gen);
+}
+
+.model-eval-head .tokens-strip {
+    font-size: 11px;
+}
+
+/* Multi-model run summary comparison table */
+.summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.summary-table th,
+.summary-table td {
+    padding: 6px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-table th:first-child,
+.summary-table td:first-child {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 400;
+}
+
+.summary-table thead th {
+    color: var(--text);
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+}
+
+.model-name {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.summary-table .col-gold {
+    color: var(--gold);
+}
+
+.summary-table .col-gen {
+    color: var(--gen);
+}
+
+.summary-table .delta {
+    margin-left: 4px;
+    font-size: 11px;
+}
+
+.model-winners {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.model-winners-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.model-winners-row .model-name {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 600;
+    min-width: 170px;
+}
+
 .run-btn {
     background: var(--card);
     color: var(--text);
@@ -554,6 +646,22 @@ details.columns summary:hover {
 
 .run-panel input[type="text"] {
     width: 220px;
+}
+
+.run-panel textarea {
+    width: 220px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--text);
+    background: white;
+    resize: vertical;
+}
+
+.run-panel textarea:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .run-status {

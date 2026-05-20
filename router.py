@@ -532,12 +532,28 @@ router = APIRouter()
 
 @router.post("/api/eval/run")
 async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingResponse:
+    # Per-run model overrides from the request; blank falls back to the env vars.
+    # generator_models runs each model against every dataset for side-by-side
+    # comparison; an empty list falls back to the single LLM_MODEL env var.
+    generator_models: list[str] = []
+    for raw in request.generatorModels or []:
+        name = (raw or "").strip()[:200]
+        if name and name not in generator_models:
+            generator_models.append(name)
+    if not generator_models and LLM_MODEL:
+        generator_models = [LLM_MODEL]
+    judge_model = (
+        (request.judgeModel or "").strip()
+        or JUDGE_LLM_MODEL
+        or (generator_models[0] if generator_models else "")
+    )
+
     missing = [
         name
         for name, value in (
             ("LLM_ENDPOINT", LLM_ENDPOINT),
             ("LLM_API_KEY", LLM_API_KEY),
-            ("LLM_MODEL", LLM_MODEL),
+            ("generator model (LLM_MODEL env var or request field)", generator_models),
             ("SOCRATA_APP_TOKEN", SOCRATA_APP_TOKEN),
         )
         if not value
@@ -545,7 +561,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
     if missing:
         raise HTTPException(
             status_code=400,
-            detail=f"Missing required environment variables for eval: {missing}",
+            detail=f"Missing required configuration for eval: {missing}",
         )
 
     if not _CSV_PATH.exists():
@@ -559,7 +575,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
         raise HTTPException(status_code=400, detail="CSV contains no dataset IDs")
 
     started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    judge_model = JUDGE_LLM_MODEL
+    model_total = len(generator_models)
 
     async def event_stream() -> AsyncGenerator[str, None]:
         def line(payload: dict[str, Any]) -> str:
@@ -571,7 +587,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
             {
                 "type": "start",
                 "total": len(dataset_ids),
-                "generator_model": LLM_MODEL,
+                "generator_models": generator_models,
                 "judge_model": judge_model,
                 "started_at": started_at,
             }
@@ -630,151 +646,183 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                         )
                         continue
 
-                    yield line({"type": "stage", "stage": "generating"})
                     dataset_prompt = _build_dataset_prompt(
                         ds["name"],
                         ds["total_rows"],
                         ds["columns"],
                         ds["sample_rows"],
                     )
-                    gen_description, gen_usage = await _generate(
-                        openai_client, dataset_prompt, LLM_MODEL
-                    )
-
-                    yield line({"type": "stage", "stage": "judging"})
                     dataset_context = (
                         f"Dataset Name: {_sanitize_inline(ds['name'])}\n"
                         f"Rows: {ds['total_rows']}\n"
                         f"Columns: {len(ds['columns'])}\n"
                         f"Column list: {', '.join(_sanitize_inline(c['name']) for c in ds['columns'])}"
                     )
-                    dataset_judgment, judge_usage = await _judge(
-                        openai_client,
-                        dataset_context,
-                        gold_description,
-                        gen_description,
-                        _SCORING_CATEGORIES_DATASET,
-                        judge_model,
-                    )
 
-                    column_evals: list[dict[str, Any]] = []
-                    col_gen_prompt = col_gen_completion = 0
-                    col_judge_prompt = col_judge_completion = 0
+                    # Evaluate each generator model against the same dataset.
+                    model_evaluations: list[dict[str, Any]] = []
+                    for m_idx, gen_model in enumerate(generator_models, start=1):
+                        if await http_request.is_disconnected():
+                            break
+                        m_t0 = time.time()
+                        model_ctx = {
+                            "model": gen_model,
+                            "model_i": m_idx,
+                            "model_total": model_total,
+                        }
 
-                    if request.evalColumns:
-                        cols = ds["columns"]
-                        if request.maxColumnsPerDataset is not None:
-                            cols = cols[: request.maxColumnsPerDataset]
-                        scored_count = 0
-                        scored_total = sum(
-                            1 for c in cols if (c.get("description") or "").strip()
+                        yield line(
+                            {"type": "stage", "stage": "generating", **model_ctx}
                         )
-                        for col in cols:
-                            if await http_request.is_disconnected():
-                                break
-                            col_gold = (col.get("description") or "").strip()
-                            if not col_gold:
-                                continue
-                            scored_count += 1
-                            stats, sample_values, sample_non_null = (
-                                _column_stats_from_sample(
-                                    col["name"], col["dataType"], ds["sample_rows"]
+                        gen_description, gen_usage = await _generate(
+                            openai_client, dataset_prompt, gen_model
+                        )
+
+                        yield line({"type": "stage", "stage": "judging", **model_ctx})
+                        dataset_judgment, judge_usage = await _judge(
+                            openai_client,
+                            dataset_context,
+                            gold_description,
+                            gen_description,
+                            _SCORING_CATEGORIES_DATASET,
+                            judge_model,
+                        )
+
+                        column_evals: list[dict[str, Any]] = []
+                        col_gen_prompt = col_gen_completion = 0
+                        col_judge_prompt = col_judge_completion = 0
+
+                        if request.evalColumns:
+                            cols = ds["columns"]
+                            if request.maxColumnsPerDataset is not None:
+                                cols = cols[: request.maxColumnsPerDataset]
+                            scored_count = 0
+                            scored_total = sum(
+                                1 for c in cols if (c.get("description") or "").strip()
+                            )
+                            for col in cols:
+                                if await http_request.is_disconnected():
+                                    break
+                                col_gold = (col.get("description") or "").strip()
+                                if not col_gold:
+                                    continue
+                                scored_count += 1
+                                stats, sample_values, sample_non_null = (
+                                    _column_stats_from_sample(
+                                        col["name"],
+                                        col["dataType"],
+                                        ds["sample_rows"],
+                                    )
                                 )
-                            )
-                            est_non_null = int(
-                                round(
-                                    ds["total_rows"]
-                                    * (sample_non_null / max(len(ds["sample_rows"]), 1))
+                                est_non_null = int(
+                                    round(
+                                        ds["total_rows"]
+                                        * (
+                                            sample_non_null
+                                            / max(len(ds["sample_rows"]), 1)
+                                        )
+                                    )
                                 )
-                            )
 
-                            yield line(
-                                {
-                                    "type": "stage",
-                                    "stage": "column",
-                                    "col": col["name"],
-                                    "i": scored_count,
-                                    "total": scored_total,
-                                }
-                            )
+                                yield line(
+                                    {
+                                        "type": "stage",
+                                        "stage": "column",
+                                        "col": col["name"],
+                                        "i": scored_count,
+                                        "total": scored_total,
+                                        **model_ctx,
+                                    }
+                                )
 
-                            column_prompt = _build_column_prompt(
-                                col["name"],
-                                col["dataType"],
-                                est_non_null,
-                                ds["total_rows"],
-                                stats,
-                                sample_values,
-                                gen_description,
-                            )
-                            col_gen, col_gen_usage = await _generate(
-                                openai_client, column_prompt, LLM_MODEL
-                            )
-                            col_gen_prompt += col_gen_usage["prompt_tokens"]
-                            col_gen_completion += col_gen_usage["completion_tokens"]
+                                column_prompt = _build_column_prompt(
+                                    col["name"],
+                                    col["dataType"],
+                                    est_non_null,
+                                    ds["total_rows"],
+                                    stats,
+                                    sample_values,
+                                    gen_description,
+                                )
+                                col_gen, col_gen_usage = await _generate(
+                                    openai_client, column_prompt, gen_model
+                                )
+                                col_gen_prompt += col_gen_usage["prompt_tokens"]
+                                col_gen_completion += col_gen_usage["completion_tokens"]
 
-                            col_context = (
-                                f"Dataset: {_sanitize_inline(ds['name'])}\n"
-                                f"Column name: {_sanitize_inline(col['name'])}\n"
-                                f"Data type: {_sanitize_inline(col['dataType'])}\n"
-                                f"Estimated non-null: {est_non_null}/{ds['total_rows']}\n"
-                                f"Sample values: {', '.join(_sanitize_inline(v) for v in sample_values)}"
-                            )
-                            col_judgment, col_judge_usage = await _judge(
-                                openai_client,
-                                col_context,
-                                col_gold,
-                                col_gen,
-                                _SCORING_CATEGORIES_COLUMN,
-                                judge_model,
-                            )
-                            col_judge_prompt += col_judge_usage["prompt_tokens"]
-                            col_judge_completion += col_judge_usage["completion_tokens"]
+                                col_context = (
+                                    f"Dataset: {_sanitize_inline(ds['name'])}\n"
+                                    f"Column name: {_sanitize_inline(col['name'])}\n"
+                                    f"Data type: {_sanitize_inline(col['dataType'])}\n"
+                                    f"Estimated non-null: {est_non_null}/{ds['total_rows']}\n"
+                                    f"Sample values: {', '.join(_sanitize_inline(v) for v in sample_values)}"
+                                )
+                                col_judgment, col_judge_usage = await _judge(
+                                    openai_client,
+                                    col_context,
+                                    col_gold,
+                                    col_gen,
+                                    _SCORING_CATEGORIES_COLUMN,
+                                    judge_model,
+                                )
+                                col_judge_prompt += col_judge_usage["prompt_tokens"]
+                                col_judge_completion += col_judge_usage[
+                                    "completion_tokens"
+                                ]
 
-                            column_evals.append(
-                                {
-                                    "field_name": col["fieldName"],
-                                    "display_name": col["name"],
-                                    "data_type": col["dataType"],
-                                    "gold_description": col_gold,
-                                    "generated_description": col_gen,
-                                    "judgment": col_judgment,
-                                }
-                            )
+                                column_evals.append(
+                                    {
+                                        "field_name": col["fieldName"],
+                                        "display_name": col["name"],
+                                        "data_type": col["dataType"],
+                                        "gold_description": col_gold,
+                                        "generated_description": col_gen,
+                                        "judgment": col_judgment,
+                                    }
+                                )
+
+                        model_evaluations.append(
+                            {
+                                "generator_model": gen_model,
+                                "dataset_evaluation": {
+                                    "gold_description": gold_description,
+                                    "generated_description": gen_description,
+                                    "judgment": dataset_judgment,
+                                },
+                                "column_evaluations": column_evals,
+                                "tokens": {
+                                    "dataset_generation": {
+                                        "prompt": gen_usage["prompt_tokens"],
+                                        "completion": gen_usage["completion_tokens"],
+                                        "total": gen_usage["total_tokens"],
+                                    },
+                                    "dataset_judge": {
+                                        "prompt": judge_usage["prompt_tokens"],
+                                        "completion": judge_usage["completion_tokens"],
+                                        "total": judge_usage["total_tokens"],
+                                    },
+                                    "column_generation": {
+                                        "prompt": col_gen_prompt,
+                                        "completion": col_gen_completion,
+                                        "total": col_gen_prompt + col_gen_completion,
+                                    },
+                                    "column_judge": {
+                                        "prompt": col_judge_prompt,
+                                        "completion": col_judge_completion,
+                                        "total": col_judge_prompt
+                                        + col_judge_completion,
+                                    },
+                                },
+                                "elapsed_seconds": round(time.time() - m_t0, 2),
+                            }
+                        )
 
                     result = {
                         "dataset_id": dataset_id,
                         "name": ds["name"],
                         "total_rows": ds["total_rows"],
                         "column_count": len(ds["columns"]),
-                        "dataset_evaluation": {
-                            "gold_description": gold_description,
-                            "generated_description": gen_description,
-                            "judgment": dataset_judgment,
-                        },
-                        "column_evaluations": column_evals,
-                        "tokens": {
-                            "dataset_generation": {
-                                "prompt": gen_usage["prompt_tokens"],
-                                "completion": gen_usage["completion_tokens"],
-                                "total": gen_usage["total_tokens"],
-                            },
-                            "dataset_judge": {
-                                "prompt": judge_usage["prompt_tokens"],
-                                "completion": judge_usage["completion_tokens"],
-                                "total": judge_usage["total_tokens"],
-                            },
-                            "column_generation": {
-                                "prompt": col_gen_prompt,
-                                "completion": col_gen_completion,
-                                "total": col_gen_prompt + col_gen_completion,
-                            },
-                            "column_judge": {
-                                "prompt": col_judge_prompt,
-                                "completion": col_judge_completion,
-                                "total": col_judge_prompt + col_judge_completion,
-                            },
-                        },
+                        "model_evaluations": model_evaluations,
                         "elapsed_seconds": round(time.time() - t0, 2),
                     }
                     results.append(result)
@@ -792,7 +840,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                     "finished_at": datetime.now(timezone.utc)
                     .isoformat()
                     .replace("+00:00", "Z"),
-                    "generator_model": LLM_MODEL,
+                    "generator_models": generator_models,
                     "judge_model": judge_model,
                     "llm_endpoint": LLM_ENDPOINT,
                     "csv_source": _CSV_PATH.name,

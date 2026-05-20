@@ -77,6 +77,8 @@ const RUN_DEFAULTS = {
 const runToggle = document.getElementById("run-toggle");
 const runPanel = document.getElementById("run-panel");
 const runBackend = document.getElementById("run-backend");
+const runGeneratorModels = document.getElementById("run-generator-models");
+const runJudgeModel = document.getElementById("run-judge-model");
 const runLimit = document.getElementById("run-limit");
 const runEvalColumns = document.getElementById("run-eval-columns");
 const runMaxCols = document.getElementById("run-max-cols");
@@ -86,6 +88,8 @@ const runStatus = document.getElementById("run-status");
 
 // Restore persisted run-panel inputs.
 runBackend.value = localStorage.getItem("evalViewer.runBackend") || RUN_DEFAULTS.backend;
+runGeneratorModels.value = localStorage.getItem("evalViewer.runGeneratorModels") || "";
+runJudgeModel.value = localStorage.getItem("evalViewer.runJudgeModel") || "";
 const savedLimit = localStorage.getItem("evalViewer.runLimit");
 if (savedLimit) runLimit.value = savedLimit;
 const savedEvalCols = localStorage.getItem("evalViewer.runEvalColumns");
@@ -95,14 +99,26 @@ if (savedMaxCols) runMaxCols.value = savedMaxCols;
 
 function persistRunInputs() {
   localStorage.setItem("evalViewer.runBackend", runBackend.value.trim());
+  localStorage.setItem("evalViewer.runGeneratorModels", runGeneratorModels.value);
+  localStorage.setItem("evalViewer.runJudgeModel", runJudgeModel.value.trim());
   localStorage.setItem("evalViewer.runLimit", String(runLimit.value));
   localStorage.setItem("evalViewer.runEvalColumns", runEvalColumns.checked ? "1" : "0");
   localStorage.setItem("evalViewer.runMaxCols", String(runMaxCols.value));
 }
 
-[runBackend, runLimit, runEvalColumns, runMaxCols].forEach((el) => {
+[runBackend, runGeneratorModels, runJudgeModel, runLimit, runEvalColumns, runMaxCols].forEach((el) => {
   el.addEventListener("change", persistRunInputs);
 });
+
+// Parse the generator-models textarea into a deduped list (one model per line).
+function parseGeneratorModels() {
+  const seen = [];
+  for (const line of runGeneratorModels.value.split("\n")) {
+    const m = line.trim();
+    if (m && !seen.includes(m)) seen.push(m);
+  }
+  return seen;
+}
 
 function updateMaxColsState() {
   runMaxCols.disabled = !runEvalColumns.checked;
@@ -147,6 +163,11 @@ runStart.addEventListener("click", async () => {
     evalColumns: runEvalColumns.checked,
     maxColumnsPerDataset: parseInt(runMaxCols.value, 10) || RUN_DEFAULTS.maxCols,
   };
+  // Blank model fields → backend uses its LLM_MODEL / JUDGE_LLM_MODEL env defaults.
+  const genModels = parseGeneratorModels();
+  const judgeModel = runJudgeModel.value.trim();
+  if (genModels.length) body.generatorModels = genModels;
+  if (judgeModel) body.judgeModel = judgeModel;
 
   _runController = new AbortController();
   setRunning(true);
@@ -163,16 +184,16 @@ runStart.addEventListener("click", async () => {
     });
   } catch (err) {
     setRunStatus(`Network error: ${err.message}. Is the eval backend running? (python -m eval.main)`, true);
-    setRunning(false);
     _runController = null;
+    setRunning(false);
     return;
   }
 
   if (!resp.ok || !resp.body) {
     const text = await resp.text().catch(() => "");
     setRunStatus(`HTTP ${resp.status}: ${text || resp.statusText}`, true);
-    setRunning(false);
     _runController = null;
+    setRunning(false);
     return;
   }
 
@@ -208,8 +229,8 @@ runStart.addEventListener("click", async () => {
       setRunStatus(`Stream error: ${err.message}`, true);
     }
   } finally {
-    setRunning(false);
     _runController = null;
+    setRunning(false);
   }
 });
 
@@ -217,30 +238,34 @@ function handleRunEvent(evt, state) {
   switch (evt.type) {
     case "start":
       state.meta = {
-        generator_model: evt.generator_model,
+        generator_models: evt.generator_models,
         judge_model: evt.judge_model,
         generated_at: evt.started_at,
         scoring_categories_dataset: evt.scoring_categories_dataset,
         scoring_categories_column: evt.scoring_categories_column,
       };
-      setRunStatus(`Starting — ${evt.total} dataset${evt.total === 1 ? "" : "s"}`);
+      setRunStatus(`Starting — ${evt.total} dataset${evt.total === 1 ? "" : "s"}`
+        + ((evt.generator_models?.length ?? 0) > 1 ? ` × ${evt.generator_models.length} models` : ""));
       break;
     case "dataset_start":
       state.currentDatasetLabel = `[${evt.i}/${evt.total}] ${evt.id}`;
       setRunStatus(`${state.currentDatasetLabel} — fetching…`);
       break;
     case "stage": {
+      // Prefix the per-model position only when more than one model is in play.
+      const modelPart = (evt.model_total > 1 && evt.model)
+        ? `[model ${evt.model_i}/${evt.model_total} ${evt.model}] ` : "";
       const suffix =
         evt.stage === "generating" ? "generating dataset description…"
           : evt.stage === "judging" ? "judging dataset description…"
             : evt.stage === "column" ? `column ${evt.i}/${evt.total}: ${evt.col}`
               : evt.stage;
-      setRunStatus(`${state.currentDatasetLabel} — ${suffix}`);
+      setRunStatus(`${state.currentDatasetLabel} — ${modelPart}${suffix}`);
       break;
     }
     case "dataset_done":
       state.results.push(evt.result);
-      // Re-render with the partial output, so the user sees result stream in.
+      // Re-render with the partial output, so the user sees results stream in.
       render({metadata: state.meta, results: state.results.slice()});
       break;
     case "complete":
@@ -349,48 +374,99 @@ function fmtDate(iso) {
   return d.toLocaleString();
 }
 
-// Persist rate inputs across reloads / re-renders.
-// Four rates: generator input/output, judge input/output.
-// `*_USER_SET` distinguishes "user typed this rate" (sticky) from "auto-derived from MODEL_PRICING" (refreshed when models change).
-const RATE_KEYS = ["genIn", "genOut", "judgeIn", "judgeOut"];
+// --- Result-shape normalization -------------------------------------------------
+// A dataset result holds one evaluation per generator model. New runs nest these
+// under `model_evaluations`; legacy single-model files keep the fields directly on
+// the result, so we wrap them into a one-element list keyed by the run's model.
+function modelEvalsOf(r, meta) {
+  if (Array.isArray(r?.model_evaluations)) return r.model_evaluations;
+  if (r?.dataset_evaluation) {
+    return [{
+      generator_model:
+        meta?.generator_model || meta?.generator_models?.[0] || "(generator)",
+      dataset_evaluation: r.dataset_evaluation,
+      column_evaluations: r.column_evaluations || [],
+      tokens: r.tokens || {},
+      elapsed_seconds: r.elapsed_seconds,
+    }];
+  }
+  return [];
+}
+
+// Distinct generator models across all results, in first-seen order.
+function generatorModelsIn(results, meta) {
+  const seen = [];
+  for (const r of results) {
+    if (r?.error) continue;
+    for (const me of modelEvalsOf(r, meta)) {
+      const m = me.generator_model || "(generator)";
+      if (!seen.includes(m)) seen.push(m);
+    }
+  }
+  if (!seen.length && Array.isArray(meta?.generator_models)) {
+    return meta.generator_models.slice();
+  }
+  return seen;
+}
+
+// --- Cost / token rates ---------------------------------------------------------
+// Rates are keyed dynamically: judge uses "judgeIn"/"judgeOut"; each generator
+// model uses "genIn:<slug>"/"genOut:<slug>" so several models can be priced apart.
+// `*_USER_SET` distinguishes "user typed this rate" (sticky) from "auto-derived
+// from MODEL_PRICING" (refreshed when models change).
 const RATES = {};
 const RATE_USER_SET = {};
 const RATE_AUTO_FROM = {};
-for (const k of RATE_KEYS) {
-  RATES[k] = parseFloat(localStorage.getItem("evalViewer." + k) || "0") || 0;
-  RATE_USER_SET[k] = localStorage.getItem("evalViewer." + k + "UserSet") === "1";
-  RATE_AUTO_FROM[k] = "";
+
+function rateLSKey(key) {
+  return "evalViewer.rate." + key;
 }
 
-function applyAutoPricing(generatorModel, judgeModel) {
-  const gm = lookupModelRate(generatorModel);
-  const jm = lookupModelRate(judgeModel);
+// Lazily load a rate key from localStorage the first time it is referenced.
+function ensureRate(key) {
+  if (key in RATES) return;
+  RATES[key] = parseFloat(localStorage.getItem(rateLSKey(key)) || "0") || 0;
+  RATE_USER_SET[key] = localStorage.getItem(rateLSKey(key) + ".userSet") === "1";
+  RATE_AUTO_FROM[key] = "";
+}
 
-  const setAuto = (key, sourceRate, sourceField, sourceModel) => {
+function genRateKey(model, dir) {
+  return "gen" + dir + ":" + (slugify(model) || "model");
+}
+
+function applyAutoPricing(generatorModels, judgeModel) {
+  const setAuto = (key, sourceRate, sourceField) => {
+    ensureRate(key);
     if (RATE_USER_SET[key] || !sourceRate) {
       RATE_AUTO_FROM[key] = "";
       return;
     }
     RATES[key] = sourceRate[sourceField];
-    RATE_AUTO_FROM[key] = sourceModel?.key ?? "";
+    RATE_AUTO_FROM[key] = sourceRate.key ?? "";
   };
-  setAuto("genIn", gm, "input", gm);
-  setAuto("genOut", gm, "output", gm);
-  setAuto("judgeIn", jm, "input", jm);
-  setAuto("judgeOut", jm, "output", jm);
+
+  const jm = lookupModelRate(judgeModel);
+  setAuto("judgeIn", jm, "input");
+  setAuto("judgeOut", jm, "output");
+
+  for (const model of generatorModels) {
+    const gm = lookupModelRate(model);
+    setAuto(genRateKey(model, "In"), gm, "input");
+    setAuto(genRateKey(model, "Out"), gm, "output");
+  }
 }
 
 function setRate(key, value) {
   RATES[key] = parseFloat(value) || 0;
   RATE_USER_SET[key] = true;
-  localStorage.setItem("evalViewer." + key, String(RATES[key]));
-  localStorage.setItem("evalViewer." + key + "UserSet", "1");
+  localStorage.setItem(rateLSKey(key), String(RATES[key]));
+  localStorage.setItem(rateLSKey(key) + ".userSet", "1");
 }
 
 function clearRate(key) {
   RATE_USER_SET[key] = false;
-  localStorage.removeItem("evalViewer." + key);
-  localStorage.removeItem("evalViewer." + key + "UserSet");
+  localStorage.removeItem(rateLSKey(key));
+  localStorage.removeItem(rateLSKey(key) + ".userSet");
 }
 
 // Split a per-bucket token record into {prompt, completion}.
@@ -413,72 +489,109 @@ function callCost(promptTok, completionTok, inRate, outRate) {
   return (promptTok / 1_000_000) * inRate + (completionTok / 1_000_000) * outRate;
 }
 
-function totalsFromResults(results) {
-  const t = {
-    gen: {prompt: 0, completion: 0, exact: true}, // generator across dataset + columns
-    judge: {prompt: 0, completion: 0, exact: true},
-    breakdown: {
-      ds_gen: {prompt: 0, completion: 0},
-      ds_judge: {prompt: 0, completion: 0},
-      col_gen: {prompt: 0, completion: 0},
-      col_judge: {prompt: 0, completion: 0},
-    },
-    anyLegacy: false,
+// Aggregate token usage: generator tokens summed per model, judge tokens pooled.
+function totalsFromResults(results, meta) {
+  const perModel = new Map(); // model -> {prompt, completion}
+  const judge = {prompt: 0, completion: 0};
+  let anyLegacy = false;
+  const bump = (target, s) => {
+    target.prompt += s.prompt;
+    target.completion += s.completion;
   };
   for (const r of results) {
-    const tok = r?.tokens || {};
-    for (const [bucket, target] of [
-      ["dataset_generation", "ds_gen"],
-      ["dataset_judge", "ds_judge"],
-      ["column_generation", "col_gen"],
-      ["column_judge", "col_judge"],
-    ]) {
-      const s = splitTokens(tok[bucket]);
-      t.breakdown[target].prompt += s.prompt;
-      t.breakdown[target].completion += s.completion;
-      if (!s.exact) t.anyLegacy = true;
+    if (r?.error) continue;
+    for (const me of modelEvalsOf(r, meta)) {
+      const model = me.generator_model || "(generator)";
+      if (!perModel.has(model)) perModel.set(model, {prompt: 0, completion: 0});
+      const tok = me.tokens || {};
+      for (const bucket of ["dataset_generation", "column_generation"]) {
+        const s = splitTokens(tok[bucket]);
+        bump(perModel.get(model), s);
+        if (!s.exact) anyLegacy = true;
+      }
+      for (const bucket of ["dataset_judge", "column_judge"]) {
+        const s = splitTokens(tok[bucket]);
+        bump(judge, s);
+        if (!s.exact) anyLegacy = true;
+      }
     }
   }
-  t.gen.prompt = t.breakdown.ds_gen.prompt + t.breakdown.col_gen.prompt;
-  t.gen.completion = t.breakdown.ds_gen.completion + t.breakdown.col_gen.completion;
-  t.judge.prompt = t.breakdown.ds_judge.prompt + t.breakdown.col_judge.prompt;
-  t.judge.completion = t.breakdown.ds_judge.completion + t.breakdown.col_judge.completion;
-  return t;
+  return {perModel, judge, anyLegacy};
 }
 
 function rateInput(key, label, autoFrom, userSet) {
   const hint = autoFrom
     ? `<span class="auto-hint">auto: ${escapeHtml(autoFrom)}</span>`
-    : (userSet ? `<button type="button" class="reset-btn" data-reset="${key}">use auto</button>` : "");
+    : (userSet ? `<button type="button" class="reset-btn" data-reset="${escapeHtml(key)}">use auto</button>` : "");
   return `
     <label>${label}
-      <input type="number" data-rate="${key}" min="0" step="0.01" value="${RATES[key] || ""}" placeholder="0.00">
+      <input type="number" data-rate="${escapeHtml(key)}" min="0" step="0.01" value="${RATES[key] || ""}" placeholder="0.00">
       ${hint}
     </label>
   `;
 }
 
-function costBlock(results) {
-  const t = totalsFromResults(results);
-  const genCost = callCost(t.gen.prompt, t.gen.completion, RATES.genIn, RATES.genOut);
+function tokenRow(label, prompt, completion, cost, estimate) {
+  return `
+    <div class="summary-row">
+      <span class="label">${label}</span>
+      <span class="nums">
+        <b>${fmtTokens(prompt + completion)} tok</b>
+        <span class="muted"> (${fmtTokens(prompt)} in + ${fmtTokens(completion)} out)</span>
+        <span class="cost-amount">${fmtCost(cost, estimate)}</span>
+      </span>
+    </div>
+  `;
+}
+
+function costBlock(results, meta) {
+  const t = totalsFromResults(results, meta);
+
+  const modelRows = [];
+  let genPrompt = 0;
+  let genCompletion = 0;
+  let genCost = 0;
+  for (const [model, tok] of t.perModel) {
+    const inKey = genRateKey(model, "In");
+    const outKey = genRateKey(model, "Out");
+    ensureRate(inKey);
+    ensureRate(outKey);
+    const cost = callCost(tok.prompt, tok.completion, RATES[inKey], RATES[outKey]);
+    genPrompt += tok.prompt;
+    genCompletion += tok.completion;
+    genCost += cost;
+    modelRows.push({model, inKey, outKey, tok, cost});
+  }
+
   const judgeCost = callCost(t.judge.prompt, t.judge.completion, RATES.judgeIn, RATES.judgeOut);
   const totalCost = genCost + judgeCost;
-  const grandPrompt = t.gen.prompt + t.judge.prompt;
-  const grandCompletion = t.gen.completion + t.judge.completion;
+  const grandPrompt = genPrompt + t.judge.prompt;
+  const grandCompletion = genCompletion + t.judge.completion;
   const grandTotal = grandPrompt + grandCompletion;
 
   const legacyWarning = t.anyLegacy
     ? `<div class="legacy-warn">⚠ One or more datasets only recorded <code>total_tokens</code>. Cost was computed by assuming a 50/50 prompt/completion split. Re-run the notebook to record exact prompt + completion counts.</div>`
     : "";
 
+  const rateGroups = modelRows.map(({model, inKey, outKey}) => `
+    <div class="rate-group">
+      <div class="rate-group-label" title="${escapeHtml(model)}">${escapeHtml(model)} $/1M</div>
+      ${rateInput(inKey, "input", RATE_AUTO_FROM[inKey], RATE_USER_SET[inKey])}
+      ${rateInput(outKey, "output", RATE_AUTO_FROM[outKey], RATE_USER_SET[outKey])}
+    </div>
+  `).join("");
+
+  const modelTokenRows = modelRows.map(({model, tok, cost}) =>
+    tokenRow(
+      `Generator · <span class="model-name">${escapeHtml(model)}</span>`,
+      tok.prompt, tok.completion, cost, t.anyLegacy,
+    )
+  ).join("");
+
   return `
     <h2 class="cost-heading">Token usage</h2>
     <div class="cost-controls">
-      <div class="rate-group">
-        <div class="rate-group-label">Generator $/1M</div>
-        ${rateInput("genIn", "input", RATE_AUTO_FROM.genIn, RATE_USER_SET.genIn)}
-        ${rateInput("genOut", "output", RATE_AUTO_FROM.genOut, RATE_USER_SET.genOut)}
-      </div>
+      ${rateGroups}
       <div class="rate-group">
         <div class="rate-group-label">Judge $/1M</div>
         ${rateInput("judgeIn", "input", RATE_AUTO_FROM.judgeIn, RATE_USER_SET.judgeIn)}
@@ -488,86 +601,102 @@ function costBlock(results) {
     </div>
     ${legacyWarning}
     <div class="summary-grid">
-      <div class="summary-row">
-        <span class="label">Generator</span>
-        <span class="nums">
-          <b>${fmtTokens(t.gen.prompt + t.gen.completion)} tok</b>
-          <span class="muted"> (${fmtTokens(t.gen.prompt)} in + ${fmtTokens(t.gen.completion)} out)</span>
-          <span class="cost-amount">${fmtCost(genCost, t.anyLegacy)}</span>
-        </span>
-      </div>
-      <div class="summary-row">
-        <span class="label">Judge</span>
-        <span class="nums">
-          <b>${fmtTokens(t.judge.prompt + t.judge.completion)} tok</b>
-          <span class="muted"> (${fmtTokens(t.judge.prompt)} in + ${fmtTokens(t.judge.completion)} out)</span>
-          <span class="cost-amount">${fmtCost(judgeCost, t.anyLegacy)}</span>
-        </span>
-      </div>
+      ${modelTokenRows}
+      ${tokenRow("Judge", t.judge.prompt, t.judge.completion, judgeCost, t.anyLegacy)}
       <div class="summary-row total-row">
         <span class="label"><b>Total</b></span>
         <span class="nums">
           <b>${fmtTokens(grandTotal)} tok</b>
           <span class="muted"> (${fmtTokens(grandPrompt)} in + ${fmtTokens(grandCompletion)} out)</span>
           <span class="cost-amount"><b>${fmtCost(totalCost, t.anyLegacy)}</b></span>
-          <span class="muted" style="margin-left:8px">${results.length ? `${fmtTokens(Math.round(grandTotal / results.length))} avg / dataset` : ""}</span>
         </span>
       </div>
     </div>
   `;
 }
 
-function summaryBlock(results, categories) {
-  const winnerCounts = {"1": 0, "2": 0, "tie": 0, "unknown": 0};
-  const goldScores = {};
-  const genScores = {};
-  for (const [k] of categories) {
-    goldScores[k] = [];
-    genScores[k] = [];
+function summaryBlock(results, categories, meta) {
+  const models = generatorModelsIn(results, meta);
+
+  // Per model: winner counts and per-category gold/AI score lists.
+  const perModel = new Map();
+  for (const m of models) {
+    perModel.set(m, {
+      winners: {"1": 0, "2": 0, "tie": 0, "unknown": 0},
+      gold: Object.fromEntries(categories.map(([k]) => [k, []])),
+      gen: Object.fromEntries(categories.map(([k]) => [k, []])),
+    });
   }
 
+  let datasetCount = 0;
   for (const r of results) {
-    const j = r?.dataset_evaluation?.judgment;
-    if (!j) continue;
-    const w = j.winner ?? "unknown";
-    winnerCounts[w] = (winnerCounts[w] ?? 0) + 1;
-    for (const [k] of categories) {
-      if (typeof j.candidate1?.[k] === "number") goldScores[k].push(j.candidate1[k]);
-      if (typeof j.candidate2?.[k] === "number") genScores[k].push(j.candidate2[k]);
+    if (r?.error) continue;
+    datasetCount++;
+    for (const me of modelEvalsOf(r, meta)) {
+      const acc = perModel.get(me.generator_model || "(generator)");
+      if (!acc) continue;
+      const j = me.dataset_evaluation?.judgment;
+      if (!j) continue;
+      const w = j.winner ?? "unknown";
+      acc.winners[w] = (acc.winners[w] ?? 0) + 1;
+      for (const [k] of categories) {
+        if (typeof j.candidate1?.[k] === "number") acc.gold[k].push(j.candidate1[k]);
+        if (typeof j.candidate2?.[k] === "number") acc.gen[k].push(j.candidate2[k]);
+      }
     }
   }
 
-  const rows = categories.map(([key, label]) => {
-    const g = avg(goldScores[key]);
-    const a = avg(genScores[key]);
-    if (g === null && a === null) return "";
-    const delta = (g !== null && a !== null) ? (a - g) : null;
-    const dClass = delta === null ? "delta-zero" : delta > 0 ? "delta-pos" : delta < 0 ? "delta-neg" : "delta-zero";
-    const dStr = delta === null ? "–" : (delta > 0 ? "+" : "") + delta.toFixed(2);
+  // Gold column = average of the gold score across every model's judgments.
+  const goldAvg = {};
+  for (const [k] of categories) {
+    const all = [];
+    for (const acc of perModel.values()) all.push(...acc.gold[k]);
+    goldAvg[k] = avg(all);
+  }
+
+  const headerCells = models
+    .map((m) => `<th class="model-name col-gen">${escapeHtml(m)}</th>`)
+    .join("");
+
+  const bodyRows = categories.map(([key, label]) => {
+    const g = goldAvg[key];
+    const modelAvgs = models.map((m) => avg(perModel.get(m).gen[key]));
+    if (g === null && modelAvgs.every((a) => a === null)) return "";
+    const cells = modelAvgs.map((a) => {
+      const delta = (g !== null && a !== null) ? a - g : null;
+      const dClass = delta === null ? "delta-zero"
+        : delta > 0 ? "delta-pos" : delta < 0 ? "delta-neg" : "delta-zero";
+      const dStr = delta === null ? ""
+        : ` <span class="delta ${dClass}">(${delta > 0 ? "+" : ""}${delta.toFixed(2)})</span>`;
+      return `<td>${a !== null ? a.toFixed(2) : "–"}${dStr}</td>`;
+    }).join("");
+    return `<tr><td>${escapeHtml(label)}</td><td class="col-gold">${g !== null ? g.toFixed(2) : "–"}</td>${cells}</tr>`;
+  }).join("");
+
+  const winnerRows = models.map((m) => {
+    const w = perModel.get(m).winners;
     return `
-      <div class="summary-row">
-        <span class="label">${escapeHtml(label)}</span>
-        <span class="nums">
-          <span class="score-gold">${g?.toFixed(2) ?? "–"}</span>
-          →
-          <span class="score-gen">${a?.toFixed(2) ?? "–"}</span>
-          <span class="delta ${dClass}">(${dStr})</span>
-        </span>
+      <div class="model-winners-row">
+        <span class="model-name">${escapeHtml(m)}</span>
+        ${winnerBadge("1")} ${w["1"]}
+        ${winnerBadge("2")} ${w["2"]}
+        ${winnerBadge("tie")} ${w["tie"]}
+        ${w["unknown"] ? `<span class="winner-badge winner-tie">Unknown</span> ${w["unknown"]}` : ""}
       </div>
     `;
   }).join("");
 
+  const modelNote = models.length > 1 ? `, ${models.length} generator models` : "";
+
   return `
     <div class="summary">
-      <h2>Run summary — dataset-level averages (${results.length} datasets)</h2>
-      <div style="margin-bottom:12px">
-        ${winnerBadge("1")} ${winnerCounts["1"]} &nbsp;
-        ${winnerBadge("2")} ${winnerCounts["2"]} &nbsp;
-        ${winnerBadge("tie")} ${winnerCounts["tie"]}
-        ${winnerCounts["unknown"] ? ` &nbsp; <span class="winner-badge winner-tie">Unknown</span> ${winnerCounts["unknown"]}` : ""}
-      </div>
-      <div class="summary-grid">${rows}</div>
-      ${costBlock(results)}
+      <h2>Run summary — dataset-level averages (${datasetCount} dataset${datasetCount === 1 ? "" : "s"}${modelNote})</h2>
+      <div class="model-winners">${winnerRows}</div>
+      <table class="summary-table">
+        <thead><tr><th>Category</th><th class="col-gold">Gold</th>${headerCells}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      ${costBlock(results, meta)}
     </div>
   `;
 }
@@ -584,13 +713,11 @@ function columnCard(col, categories) {
   `;
 }
 
-function datasetCard(r, dsCats, colCats) {
-  if (r.error) {
-    return `<div class="card"><h2>${escapeHtml(r.dataset_id)} ${r.name ? "— " + escapeHtml(r.name) : ""}</h2><div class="error">${escapeHtml(r.error)}</div></div>`;
-  }
-  const j = r.dataset_evaluation?.judgment ?? {};
-  const cols = r.column_evaluations ?? [];
-  const tok = r.tokens || {};
+// One generator model's evaluation of a dataset (gold vs that model's output).
+function modelEvalBlock(me, dsCats, colCats) {
+  const j = me.dataset_evaluation?.judgment ?? {};
+  const cols = me.column_evaluations ?? [];
+  const tok = me.tokens || {};
   const dsGen = splitTokens(tok.dataset_generation);
   const colGen = splitTokens(tok.column_generation);
   const dsJud = splitTokens(tok.dataset_judge);
@@ -602,20 +729,22 @@ function datasetCard(r, dsCats, colCats) {
   const judgeCompletion = dsJud.completion + colJud.completion;
   const genTokens = genPrompt + genCompletion;
   const judgeTokens = judgePrompt + judgeCompletion;
-  const rowCost = callCost(genPrompt, genCompletion, RATES.genIn, RATES.genOut)
+  const model = me.generator_model || "(generator)";
+  const inKey = genRateKey(model, "In");
+  const outKey = genRateKey(model, "Out");
+  ensureRate(inKey);
+  ensureRate(outKey);
+  const rowCost = callCost(genPrompt, genCompletion, RATES[inKey], RATES[outKey])
     + callCost(judgePrompt, judgeCompletion, RATES.judgeIn, RATES.judgeOut);
   return `
-    <div class="card">
-      <h2>${escapeHtml(r.name || r.dataset_id)}</h2>
-      <div class="sub">
-        <code>${escapeHtml(r.dataset_id)}</code>
-        <span>${r.total_rows?.toLocaleString() ?? "?"} rows</span>
-        <span>${r.column_count ?? "?"} columns</span>
-        <span>${(r.elapsed_seconds ?? "?")}s</span>
-        <span class="tokens-strip">gen <b>${fmtTokens(genTokens)}</b> + judge <b>${fmtTokens(judgeTokens)}</b> = <b>${fmtTokens(genTokens + judgeTokens)}</b> tok${rowCost > 0 ? ` · <b>${fmtCost(rowCost, rowEstimate)}</b>` : ""}</span>
+    <div class="model-eval">
+      <h3 class="model-eval-head">
+        <span class="model-eval-name">${escapeHtml(model)}</span>
         ${winnerBadge(j.winner)}
-      </div>
-      ${descPair(r.dataset_evaluation?.gold_description, r.dataset_evaluation?.generated_description)}
+        <span class="tokens-strip">gen <b>${fmtTokens(genTokens)}</b> + judge <b>${fmtTokens(judgeTokens)}</b> = <b>${fmtTokens(genTokens + judgeTokens)}</b> tok${rowCost > 0 ? ` · <b>${fmtCost(rowCost, rowEstimate)}</b>` : ""}</span>
+        ${typeof me.elapsed_seconds === "number" ? `<span class="muted">${me.elapsed_seconds}s</span>` : ""}
+      </h3>
+      ${descPair(me.dataset_evaluation?.gold_description, me.dataset_evaluation?.generated_description)}
       ${scoresBlock(j, dsCats)}
       ${reasoningBlock(j)}
       ${cols.length ? `
@@ -624,6 +753,28 @@ function datasetCard(r, dsCats, colCats) {
           ${cols.map((c) => columnCard(c, colCats)).join("")}
         </details>
       ` : ""}
+    </div>
+  `;
+}
+
+function datasetCard(r, dsCats, colCats, meta) {
+  if (r.error) {
+    return `<div class="card"><h2>${escapeHtml(r.dataset_id)} ${r.name ? "— " + escapeHtml(r.name) : ""}</h2><div class="error">${escapeHtml(r.error)}</div></div>`;
+  }
+  const modelEvals = modelEvalsOf(r, meta);
+  return `
+    <div class="card">
+      <h2>${escapeHtml(r.name || r.dataset_id)}</h2>
+      <div class="sub">
+        <code>${escapeHtml(r.dataset_id)}</code>
+        <span>${r.total_rows?.toLocaleString() ?? "?"} rows</span>
+        <span>${r.column_count ?? "?"} columns</span>
+        <span>${(r.elapsed_seconds ?? "?")}s</span>
+        ${modelEvals.length > 1 ? `<span>${modelEvals.length} generator models</span>` : ""}
+      </div>
+      ${modelEvals.length
+    ? modelEvals.map((me) => modelEvalBlock(me, dsCats, colCats)).join("")
+    : `<div class="error">No model evaluations in this result.</div>`}
     </div>
   `;
 }
@@ -641,10 +792,17 @@ function slugify(s) {
 function buildSaveFilename(data) {
   const meta = data?.metadata ?? {};
   const parts = ["eval_results"];
-  const gen = slugify(meta.generator_model);
+  const models = Array.isArray(meta.generator_models)
+    ? meta.generator_models
+    : (meta.generator_model ? [meta.generator_model] : []);
+  if (models.length === 1) {
+    const gen = slugify(models[0]);
+    if (gen) parts.push(gen);
+  } else if (models.length > 1) {
+    parts.push((slugify(models[0]) || "multi") + `-and-${models.length - 1}-more`);
+  }
   const judge = slugify(meta.judge_model);
-  if (gen) parts.push(gen);
-  if (judge && judge !== gen) parts.push("vs", judge);
+  if (judge && !models.map(slugify).includes(judge)) parts.push("vs", judge);
   // Prefer the run's own timestamp; fall back to "now" so two saves don't collide.
   const stamp = (meta.generated_at || new Date().toISOString())
     .replace(/[:.]/g, "-")
@@ -671,14 +829,15 @@ function render(data) {
   updateSaveButton();
   const meta = data.metadata ?? {};
   const results = data.results ?? [];
-  applyAutoPricing(meta.generator_model, meta.judge_model);
+  const genModels = generatorModelsIn(results, meta);
+  applyAutoPricing(genModels, meta.judge_model);
   const dsCats = (meta.scoring_categories_dataset || []).map((c) => [c.key, c.label]);
   const colCats = (meta.scoring_categories_column || []).map((c) => [c.key, c.label]);
   const useDsCats = dsCats.length ? dsCats : CATS_FALLBACK;
   const useColCats = colCats.length ? colCats : CATS_FALLBACK.filter(([k]) => k !== "consistency");
 
   metaEl.innerHTML = `
-    <span><b>Generator:</b> ${escapeHtml(meta.generator_model || "?")}</span>
+    <span><b>Generator${genModels.length === 1 ? "" : "s"}:</b> ${genModels.length ? escapeHtml(genModels.join(", ")) : "?"}</span>
     <span><b>Judge:</b> ${escapeHtml(meta.judge_model || "?")}</span>
     <span><b>Datasets:</b> ${results.length}</span>
     ${meta.generated_at ? `<span><b>Started:</b> ${escapeHtml(fmtDate(meta.generated_at))}</span>` : ""}
@@ -694,7 +853,8 @@ function render(data) {
   const focusKey = active?.getAttribute?.("data-rate") || null;
   const caret = focusKey && typeof active.selectionStart === "number" ? active.selectionStart : null;
 
-  main.innerHTML = summaryBlock(results, useDsCats) + results.map((r) => datasetCard(r, useDsCats, useColCats)).join("");
+  main.innerHTML = summaryBlock(results, useDsCats, meta)
+    + results.map((r) => datasetCard(r, useDsCats, useColCats, meta)).join("");
   wireRateInputs();
 
   if (focusKey) {
