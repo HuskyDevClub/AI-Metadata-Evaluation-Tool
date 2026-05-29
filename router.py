@@ -29,7 +29,7 @@ from .models import EvalRunRequest
 
 logger = logging.getLogger(__name__)
 
-_CSV_PATH = Path(__file__).resolve().parent / "DatasetsWithSolidMetadata - Sheet1.csv"
+_CSV_PATH = Path(__file__).resolve().parent / "DatasetsWithSolidMetadata.csv"
 
 _FENCE_RE = re.compile(r"<<<\s*(?:END_)?UNTRUSTED_DATA\s*>>>", re.IGNORECASE)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]")
@@ -519,7 +519,7 @@ async def _judge(
 
 
 def _load_dataset_ids(limit: int | None) -> list[str]:
-    with open(_CSV_PATH, newline="", encoding="utf-8") as f:
+    with open(_CSV_PATH, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         ids = [r["UID"].strip() for r in reader if r.get("UID", "").strip()]
     if limit is not None:
