@@ -18,14 +18,14 @@ from openai.types.shared_params import (
 )
 from openai.types.shared_params.response_format_json_schema import JSONSchema
 
-from .config import (
+from config import (
     JUDGE_LLM_MODEL,
     LLM_API_KEY,
     LLM_ENDPOINT,
     LLM_MODEL,
     SOCRATA_APP_TOKEN,
 )
-from .models import EvalRunRequest
+from models import EvalRunRequest
 
 logger = logging.getLogger(__name__)
 

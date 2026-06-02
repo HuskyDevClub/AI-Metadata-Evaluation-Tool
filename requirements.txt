@@ -1,0 +1,15 @@
+# FastAPI and ASGI server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# HTTP client for Socrata + LLM endpoints
+httpx>=0.26.0
+
+# OpenAI SDK (works with Azure OpenAI)
+openai>=2.17.0
+
+# Pydantic for data validation
+pydantic>=2.5.0
+
+# Environment variable management
+python-dotenv>=1.0.0

@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import PORT
-from .router import router
+from config import PORT
+from router import router
 
 app = FastAPI(
     title="AI Metadata Eval API",
@@ -10,8 +10,8 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# The eval viewer is a standalone HTML in eval/, usually opened either via
-# `python -m http.server 5500` from the eval/ directory, or directly off disk
+# The eval viewer is a standalone HTML in this repo, usually opened either via
+# `python -m http.server 5500` from the repo directory, or directly off disk
 # (file://). Allow those origins.
 app.add_middleware(
     CORSMiddleware,
