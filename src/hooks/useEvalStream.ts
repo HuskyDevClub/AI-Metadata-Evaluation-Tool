@@ -87,6 +87,7 @@ export function useEvalStream(): UseEvalStream {
                         generator_models: evt.generator_models,
                         judge_model: evt.judge_model,
                         generated_at: evt.started_at,
+                        prompts_source: evt.prompts_source,
                         scoring_categories_dataset: evt.scoring_categories_dataset,
                         scoring_categories_column: evt.scoring_categories_column,
                     }

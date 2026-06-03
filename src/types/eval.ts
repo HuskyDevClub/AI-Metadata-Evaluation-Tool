@@ -74,6 +74,7 @@ export interface EvalMeta {
     generator_model?: string
     judge_model?: string
     generated_at?: string
+    prompts_source?: string
     scoring_categories_dataset?: Category[]
     scoring_categories_column?: Category[]
 }
@@ -99,6 +100,7 @@ export interface StartEvent {
     generator_models?: string[]
     judge_model?: string
     started_at?: string
+    prompts_source?: string
     scoring_categories_dataset?: Category[]
     scoring_categories_column?: Category[]
 }

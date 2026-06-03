@@ -23,6 +23,11 @@ export function MetaStrip({ data }: { data: EvalOutput }) {
                     <b>Started:</b> {fmtDate(meta.generated_at)}
                 </span>
             )}
+            {meta.prompts_source && (
+                <span>
+                    <b>Prompts:</b> {meta.prompts_source}
+                </span>
+            )}
         </div>
     )
 }

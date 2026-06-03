@@ -20,6 +20,13 @@ JUDGE_LLM_MODEL = os.getenv("JUDGE_LLM_MODEL", "") or LLM_MODEL
 # --- Socrata ---------------------------------------------------------------
 SOCRATA_APP_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")
 
+# --- Prompts ---------------------------------------------------------------
+# Base URL of the AI-Metadata-Improvement-Tool backend (e.g. its Databricks App
+# URL). When set, the eval fetches the canonical prompt templates from
+# {PROMPTS_SOURCE_URL}/api/prompts so it scores the exact prompts that tool
+# ships. When empty (the default) it uses the bundled copies in backend/prompts.
+PROMPTS_SOURCE_URL = os.getenv("PROMPTS_SOURCE_URL", "")
+
 # --- Server ----------------------------------------------------------------
 # Canonical allowed CORS origin. In production the frontend and backend are
 # same-origin (Databricks Apps), so no preflight fires; in dev the Vite proxy

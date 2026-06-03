@@ -68,6 +68,16 @@ The app deploys to Databricks Apps via GitHub Actions (build → push a
 the one-time workspace + secrets setup. Start from
 `cp .env.databricks.example .env.databricks`.
 
+## Prompts (shared with the main tool)
+
+The metadata-generation prompts (`system`, `dataset`, `column`) are the same
+templates the main tool ships, so the eval scores the prompts that actually run
+in production rather than a drifting copy. The main tool exposes them at
+`GET /api/prompts`; set `PROMPTS_SOURCE_URL` to its base URL and the eval fetches
+them at the start of each run (recorded as `prompts_source` in the run metadata).
+When unset or unreachable, it falls back to the bundled copies in
+`backend/prompts/`. The judge prompts are eval-only and live in `backend/router.py`.
+
 ## Benchmark dataset
 
 The eval reads `backend/DatasetsWithSolidMetadata.csv`. This file is git-ignored
