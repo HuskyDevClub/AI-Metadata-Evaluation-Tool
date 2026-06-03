@@ -1,0 +1,72 @@
+name: Deploy to Databricks
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: databricks-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Write .env.databricks from secret
+        env:
+          DATABRICKS_ENV_FILE: ${{ secrets.DATABRICKS_ENV_FILE }}
+        run: printf '%s' "$DATABRICKS_ENV_FILE" > .env.databricks
+
+      - name: Setup Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Sync secrets to Databricks
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_ENV_FILE: ${{ secrets.DATABRICKS_ENV_FILE }}
+        run: |
+          # Create the scope on first run; ignore "already exists" afterwards.
+          databricks secrets create-scope metadata-eval-tool 2>/dev/null || true
+          while IFS='=' read -r KEY VAL; do
+            [[ "$KEY" =~ ^#.*$ || -z "$KEY" ]] && continue
+            VAL="${VAL%\"}"; VAL="${VAL#\"}"
+            echo "  syncing $KEY"
+            databricks secrets put-secret metadata-eval-tool "$KEY" --string-value "$VAL"
+          done <<< "$DATABRICKS_ENV_FILE"
+
+      - name: Register secret resources on the app
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          APP_NAME=$(grep -E '^DATABRICKS_APP_NAME=' .env.databricks | cut -d= -f2- | tr -d '"')
+          RESOURCES=$(jq -nc '[
+            {name:"llm-endpoint",      secret:{scope:"metadata-eval-tool", key:"LLM_ENDPOINT",      permission:"READ"}},
+            {name:"llm-api-key",       secret:{scope:"metadata-eval-tool", key:"LLM_API_KEY",       permission:"READ"}},
+            {name:"llm-model",         secret:{scope:"metadata-eval-tool", key:"LLM_MODEL",         permission:"READ"}},
+            {name:"judge-llm-model",   secret:{scope:"metadata-eval-tool", key:"JUDGE_LLM_MODEL",   permission:"READ"}},
+            {name:"socrata-app-token", secret:{scope:"metadata-eval-tool", key:"SOCRATA_APP_TOKEN", permission:"READ"}},
+            {name:"frontend-url",      secret:{scope:"metadata-eval-tool", key:"FRONTEND_URL",      permission:"READ"}}
+          ]')
+          databricks apps update "$APP_NAME" --json "{\"resources\": $RESOURCES}"
+
+      - name: Build and deploy
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./deploy.sh

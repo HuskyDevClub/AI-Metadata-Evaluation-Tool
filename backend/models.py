@@ -1,11 +1,17 @@
 from pydantic import BaseModel, Field
 
 
-class EvalRunRequest(BaseModel):
-    """Request body for the dev-mode metadata eval run (POST /api/eval/run).
+class HealthResponse(BaseModel):
+    """Response body for the /health check."""
 
-    Mirrors the tunable knobs in evaluate_metadata_quality.ipynb. Served by the
-    standalone eval backend (eval.main); not part of the main app.
+    status: str
+    timestamp: str
+
+
+class EvalRunRequest(BaseModel):
+    """Request body for the metadata eval run (POST /api/eval/run).
+
+    Mirrors the tunable knobs in evaluate_metadata_quality.ipynb.
     """
 
     datasetLimit: int | None = Field(default=5, ge=1, le=200)

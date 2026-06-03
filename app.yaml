@@ -1,0 +1,24 @@
+# Databricks Apps Configuration
+# Secret-backed env vars are wired via app-level resources (set in CI by
+# `databricks apps update --json`), referenced here by `valueFrom: <resource-name>`.
+
+command:
+  - "sh"
+  - "-c"
+  - |
+    pip install -r backend/requirements.txt && \
+    uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+env:
+  - name: LLM_ENDPOINT
+    valueFrom: llm-endpoint
+  - name: LLM_API_KEY
+    valueFrom: llm-api-key
+  - name: LLM_MODEL
+    valueFrom: llm-model
+  - name: JUDGE_LLM_MODEL
+    valueFrom: judge-llm-model
+  - name: SOCRATA_APP_TOKEN
+    valueFrom: socrata-app-token
+  - name: FRONTEND_URL
+    valueFrom: frontend-url

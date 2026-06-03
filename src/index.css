@@ -423,7 +423,6 @@ details.columns summary:hover {
     border: 1px solid #fecaca;
 }
 
-/* Inline styles previously baked into JS templates */
 .cost-heading {
     margin: 16px 0 8px;
     font-size: 14px;
@@ -447,14 +446,6 @@ details.columns summary:hover {
 
 .delta {
     margin-left: 8px;
-}
-
-.score-gold {
-    color: var(--gold);
-}
-
-.score-gen {
-    color: var(--gen);
 }
 
 .column-type {
