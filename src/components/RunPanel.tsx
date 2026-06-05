@@ -1,30 +1,15 @@
-import { useEffect, useState } from 'react'
-import type { EvalRunRequest } from '@/types/eval'
+import {useEffect, useState} from 'react'
+import type {EvalRunRequest} from '@/types/eval'
+import {parseGeneratorModels, RUN_DEFAULTS, RUN_LS as LS} from '@/utils/runDefaults'
+import {runOverrides} from '@/utils/runConfig'
 
-const LS = {
-    gen: 'evalViewer.runGeneratorModels',
-    judge: 'evalViewer.runJudgeModel',
-    limit: 'evalViewer.runLimit',
-    evalCols: 'evalViewer.runEvalColumns',
-    maxCols: 'evalViewer.runMaxCols',
-}
-const DEFAULTS = { limit: 5, evalColumns: true, maxCols: 8 }
-
-// Parse the generator-models textarea into a deduped list (one model per line).
-function parseGeneratorModels(text: string): string[] {
-    const seen: string[] = []
-    for (const line of text.split('\n')) {
-        const m = line.trim()
-        if (m && !seen.includes(m)) seen.push(m)
-    }
-    return seen
-}
+const DEFAULTS = {limit: RUN_DEFAULTS.limit, evalColumns: RUN_DEFAULTS.evalColumns, maxCols: RUN_DEFAULTS.maxCols}
 
 export function RunPanel({
-    running,
-    onRun,
-    onCancel,
-}: {
+                             running,
+                             onRun,
+                             onCancel,
+                         }: {
     running: boolean
     onRun: (body: EvalRunRequest) => void
     onCancel: () => void
@@ -59,7 +44,8 @@ export function RunPanel({
         const judge = judgeModel.trim()
         if (gen.length) body.generatorModels = gen
         if (judge) body.judgeModel = judge
-        onRun(body)
+        // Fold in prompt + judge-metric overrides configured in Settings.
+        onRun({...body, ...runOverrides()})
     }
 
     return (

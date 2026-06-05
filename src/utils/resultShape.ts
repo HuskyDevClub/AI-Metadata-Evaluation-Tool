@@ -1,4 +1,4 @@
-import type { DatasetResult, EvalMeta, ModelEvaluation } from '@/types/eval'
+import type {DatasetResult, EvalMeta, ModelEvaluation} from '@/types/eval'
 
 // A dataset result holds one evaluation per generator model. New runs nest these
 // under `model_evaluations`; legacy single-model files keep the fields directly

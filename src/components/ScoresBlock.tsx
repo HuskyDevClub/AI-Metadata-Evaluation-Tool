@@ -1,16 +1,27 @@
-import { Fragment } from 'react'
-import type { Category, Judgment } from '@/types/eval'
+import {Fragment} from 'react'
+import type {Category, Judgment} from '@/types/eval'
 
-function Bar({ score, max, klass }: { score: number; max: number; klass: string }) {
-    const pct = Math.max(0, Math.min(100, (score / max) * 100))
+function Bar({
+                 score,
+                 min,
+                 max,
+                 klass,
+             }: {
+    score: number
+    min: number
+    max: number
+    klass: string
+}) {
+    const span = max - min
+    const pct = span > 0 ? Math.max(0, Math.min(100, ((score - min) / span) * 100)) : 0
     return (
         <div className={`bar ${klass}`}>
-            <div className="bar-fill" style={{ width: `${pct}%` }} />
+            <div className="bar-fill" style={{width: `${pct}%`}}/>
         </div>
     )
 }
 
-export function ScoresBlock({ judgment, categories }: { judgment?: Judgment; categories: Category[] }) {
+export function ScoresBlock({judgment, categories}: { judgment?: Judgment; categories: Category[] }) {
     if (!judgment || !judgment.candidate1 || !judgment.candidate2) {
         return <div className="error">Judgment data missing or malformed.</div>
     }
@@ -18,7 +29,9 @@ export function ScoresBlock({ judgment, categories }: { judgment?: Judgment; cat
     const c2 = judgment.candidate2
     return (
         <div className="scores">
-            {categories.map(({ key, label }) => {
+            {categories.map(({key, label, min, max}) => {
+                const lo = min ?? 0
+                const hi = max ?? 10
                 const v1 = c1[key]
                 const v2 = c2[key]
                 const s1 = typeof v1 === 'number' ? v1 : null
@@ -28,15 +41,23 @@ export function ScoresBlock({ judgment, categories }: { judgment?: Judgment; cat
                     <Fragment key={key}>
                         <div className="cat">{label}</div>
                         <div className="bar-pair">
-                            {s1 !== null ? <Bar score={s1} max={10} klass="bar-1" /> : <div className="bar bar-1" />}
-                            {s2 !== null ? <Bar score={s2} max={10} klass="bar-2" /> : <div className="bar bar-2" />}
+                            {s1 !== null ? (
+                                <Bar score={s1} min={lo} max={hi} klass="bar-1"/>
+                            ) : (
+                                <div className="bar bar-1"/>
+                            )}
+                            {s2 !== null ? (
+                                <Bar score={s2} min={lo} max={hi} klass="bar-2"/>
+                            ) : (
+                                <div className="bar bar-2"/>
+                            )}
                         </div>
                         <div className="nums">
                             <div>
-                                <b>{s1 ?? '–'}</b>/10
+                                <b>{s1 ?? '–'}</b>/{hi}
                             </div>
                             <div>
-                                <b>{s2 ?? '–'}</b>/10
+                                <b>{s2 ?? '–'}</b>/{hi}
                             </div>
                         </div>
                     </Fragment>

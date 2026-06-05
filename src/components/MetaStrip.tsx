@@ -1,8 +1,8 @@
-import type { EvalOutput } from '@/types/eval'
-import { fmtDate } from '@/utils/format'
-import { generatorModelsIn } from '@/utils/resultShape'
+import type {EvalOutput} from '@/types/eval'
+import {fmtDate} from '@/utils/format'
+import {generatorModelsIn} from '@/utils/resultShape'
 
-export function MetaStrip({ data }: { data: EvalOutput }) {
+export function MetaStrip({data}: { data: EvalOutput }) {
     const meta = data.metadata ?? {}
     const results = data.results ?? []
     const genModels = generatorModelsIn(results, meta)

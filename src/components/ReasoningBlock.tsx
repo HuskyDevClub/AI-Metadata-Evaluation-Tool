@@ -1,6 +1,6 @@
-import type { Judgment } from '@/types/eval'
+import type {Judgment} from '@/types/eval'
 
-export function ReasoningBlock({ judgment }: { judgment?: Judgment }) {
+export function ReasoningBlock({judgment}: { judgment?: Judgment }) {
     const goldReasoning = judgment?.candidate1?.reasoning
     const aiReasoning = judgment?.candidate2?.reasoning
     const winnerReasoning = judgment?.winnerReasoning
@@ -15,7 +15,7 @@ export function ReasoningBlock({ judgment }: { judgment?: Judgment }) {
             {goldReasoning && (
                 <div className="reasoning">
                     <div className="label">
-                        <span className="dot dot-1" /> Gold reasoning
+                        <span className="dot dot-1"/> Gold reasoning
                     </div>
                     {goldReasoning}
                 </div>
@@ -23,7 +23,7 @@ export function ReasoningBlock({ judgment }: { judgment?: Judgment }) {
             {aiReasoning && (
                 <div className="reasoning">
                     <div className="label">
-                        <span className="dot dot-2" /> AI reasoning
+                        <span className="dot dot-2"/> AI reasoning
                     </div>
                     {aiReasoning}
                 </div>

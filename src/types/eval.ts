@@ -4,6 +4,33 @@
 export interface Category {
     key: string
     label: string
+    // Integer score range the judge uses for this metric (default 0–10). Older
+    // result files omit these; renderers fall back to 0–10.
+    min?: number
+    max?: number
+}
+
+// A judge metric as edited in Settings / sent in a run request. Extends Category
+// with the description that guides the judge and a required score range.
+export interface ScoringCategory extends Category {
+    description: string
+    min: number
+    max: number
+}
+
+// Generation prompt overrides; a blank/omitted field uses the backend default.
+export interface PromptOverrides {
+    system?: string
+    dataset?: string
+    column?: string
+}
+
+// GET /api/eval/defaults — the resolved default prompts + judge metrics, used to
+// pre-fill the Settings editors.
+export interface EvalDefaults {
+    prompts: { system: string; dataset: string; column: string; source: string }
+    scoring_categories_dataset: ScoringCategory[]
+    scoring_categories_column: ScoringCategory[]
 }
 
 export type TokenEntry =
@@ -21,6 +48,7 @@ export interface Tokens {
 
 export interface CandidateScores {
     reasoning?: string
+
     // Per-category integer scores (0–10), keyed by Category.key.
     [categoryKey: string]: number | string | undefined
 }
@@ -91,6 +119,10 @@ export interface EvalRunRequest {
     maxColumnsPerDataset: number
     generatorModels?: string[]
     judgeModel?: string
+    // Per-run overrides from the Settings drawer; omitted → backend defaults.
+    prompts?: PromptOverrides
+    scoringCategoriesDataset?: ScoringCategory[]
+    scoringCategoriesColumn?: ScoringCategory[]
 }
 
 // --- Streaming events ------------------------------------------------------

@@ -1,12 +1,6 @@
-import { useCallback, useRef, useState } from 'react'
-import { API_BASE_URL } from '@/utils/config'
-import type {
-    DatasetResult,
-    EvalMeta,
-    EvalOutput,
-    EvalRunRequest,
-    RunEvent,
-} from '@/types/eval'
+import {useCallback, useRef, useState} from 'react'
+import {getApiBaseUrl} from '@/utils/config'
+import type {DatasetResult, EvalMeta, EvalOutput, EvalRunRequest, RunEvent,} from '@/types/eval'
 
 export interface RunStatus {
     msg: string
@@ -28,7 +22,7 @@ export interface UseEvalStream {
 // run loop (start / dataset_start / stage / dataset_done / complete / error).
 export function useEvalStream(): UseEvalStream {
     const [running, setRunning] = useState(false)
-    const [status, setStatus] = useState<RunStatus>({ msg: '', error: false })
+    const [status, setStatus] = useState<RunStatus>({msg: '', error: false})
     const [data, setData] = useState<EvalOutput | null>(null)
     const controllerRef = useRef<AbortController | null>(null)
 
@@ -41,14 +35,14 @@ export function useEvalStream(): UseEvalStream {
         const controller = new AbortController()
         controllerRef.current = controller
         setRunning(true)
-        setStatus({ msg: 'Connecting…', error: false })
+        setStatus({msg: 'Connecting…', error: false})
         setData(null)
 
         let resp: Response
         try {
-            resp = await fetch(`${API_BASE_URL}/api/eval/run`, {
+            resp = await fetch(`${getApiBaseUrl()}/api/eval/run`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
                 body: JSON.stringify(body),
                 signal: controller.signal,
             })
@@ -64,7 +58,7 @@ export function useEvalStream(): UseEvalStream {
 
         if (!resp.ok || !resp.body) {
             const text = await resp.text().catch(() => '')
-            setStatus({ msg: `HTTP ${resp.status}: ${text || resp.statusText}`, error: true })
+            setStatus({msg: `HTTP ${resp.status}: ${text || resp.statusText}`, error: true})
             controllerRef.current = null
             setRunning(false)
             return
@@ -102,7 +96,7 @@ export function useEvalStream(): UseEvalStream {
                     break
                 case 'dataset_start':
                     runState.currentDatasetLabel = `[${evt.i}/${evt.total}] ${evt.id}`
-                    setStatus({ msg: `${runState.currentDatasetLabel} — fetching…`, error: false })
+                    setStatus({msg: `${runState.currentDatasetLabel} — fetching…`, error: false})
                     break
                 case 'stage': {
                     // Prefix the per-model position only when >1 model is in play.
@@ -114,10 +108,10 @@ export function useEvalStream(): UseEvalStream {
                         evt.stage === 'generating'
                             ? 'generating dataset description…'
                             : evt.stage === 'judging'
-                              ? 'judging dataset description…'
-                              : evt.stage === 'column'
-                                ? `column ${evt.i}/${evt.total}: ${evt.col}`
-                                : evt.stage
+                                ? 'judging dataset description…'
+                                : evt.stage === 'column'
+                                    ? `column ${evt.i}/${evt.total}: ${evt.col}`
+                                    : evt.stage
                     setStatus({
                         msg: `${runState.currentDatasetLabel} — ${modelPart}${suffix}`,
                         error: false,
@@ -127,7 +121,7 @@ export function useEvalStream(): UseEvalStream {
                 case 'dataset_done':
                     runState.results.push(evt.result)
                     // Re-render with partial output so results stream in.
-                    setData({ metadata: runState.meta, results: runState.results.slice() })
+                    setData({metadata: runState.meta, results: runState.results.slice()})
                     break
                 case 'complete':
                     // Final payload — includes scoring categories.
@@ -140,16 +134,16 @@ export function useEvalStream(): UseEvalStream {
                     })
                     break
                 case 'error':
-                    setStatus({ msg: `Server error: ${evt.error}`, error: true })
+                    setStatus({msg: `Server error: ${evt.error}`, error: true})
                     break
             }
         }
 
         try {
-            for (;;) {
-                const { value, done } = await reader.read()
+            for (; ;) {
+                const {value, done} = await reader.read()
                 if (done) break
-                buffer += decoder.decode(value, { stream: true })
+                buffer += decoder.decode(value, {stream: true})
                 let nl: number
                 while ((nl = buffer.indexOf('\n')) >= 0) {
                     const rawLine = buffer.slice(0, nl).trim()
@@ -166,9 +160,9 @@ export function useEvalStream(): UseEvalStream {
             }
         } catch (err) {
             if ((err as Error).name === 'AbortError') {
-                setStatus({ msg: 'Cancelled.', error: false })
+                setStatus({msg: 'Cancelled.', error: false})
             } else {
-                setStatus({ msg: `Stream error: ${(err as Error).message}`, error: true })
+                setStatus({msg: `Stream error: ${(err as Error).message}`, error: true})
             }
         } finally {
             controllerRef.current = null
@@ -176,5 +170,5 @@ export function useEvalStream(): UseEvalStream {
         }
     }, [])
 
-    return { running, status, data, setData, setStatus, run, cancel }
+    return {running, status, data, setData, setStatus, run, cancel}
 }

@@ -1,21 +1,21 @@
-import type { Category, ModelEvaluation } from '@/types/eval'
-import type { UseRates } from '@/hooks/useRates'
-import { callCost, genRateKey, splitTokens } from '@/utils/pricing'
-import { fmtCost, fmtTokens } from '@/utils/format'
-import { ColumnCard } from '@/components/ColumnCard'
-import { DescPair } from '@/components/DescPair'
-import { ReasoningBlock } from '@/components/ReasoningBlock'
-import { ScoresBlock } from '@/components/ScoresBlock'
-import { WinnerBadge } from '@/components/WinnerBadge'
+import type {Category, ModelEvaluation} from '@/types/eval'
+import type {UseRates} from '@/hooks/useRates'
+import {callCost, genRateKey, splitTokens} from '@/utils/pricing'
+import {fmtCost, fmtTokens} from '@/utils/format'
+import {ColumnCard} from '@/components/ColumnCard'
+import {DescPair} from '@/components/DescPair'
+import {ReasoningBlock} from '@/components/ReasoningBlock'
+import {ScoresBlock} from '@/components/ScoresBlock'
+import {WinnerBadge} from '@/components/WinnerBadge'
 
 // One generator model's evaluation of a dataset (gold vs that model's output).
 export function ModelEvalBlock({
-    me,
-    dsCats,
-    colCats,
-    judgeModel,
-    rates,
-}: {
+                                   me,
+                                   dsCats,
+                                   colCats,
+                                   judgeModel,
+                                   rates,
+                               }: {
     me: ModelEvaluation
     dsCats: Category[]
     colCats: Category[]
@@ -48,7 +48,7 @@ export function ModelEvalBlock({
         <div className="model-eval">
             <h3 className="model-eval-head">
                 <span className="model-eval-name">{model}</span>
-                <WinnerBadge winner={j.winner} />
+                <WinnerBadge winner={j.winner}/>
                 <span className="tokens-strip">
                     gen <b>{fmtTokens(genTokens)}</b> + judge <b>{fmtTokens(judgeTokens)}</b> ={' '}
                     <b>{fmtTokens(genTokens + judgeTokens)}</b> tok
@@ -67,15 +67,15 @@ export function ModelEvalBlock({
                 gold={me.dataset_evaluation?.gold_description}
                 gen={me.dataset_evaluation?.generated_description}
             />
-            <ScoresBlock judgment={j} categories={dsCats} />
-            <ReasoningBlock judgment={j} />
+            <ScoresBlock judgment={j} categories={dsCats}/>
+            <ReasoningBlock judgment={j}/>
             {cols.length > 0 && (
                 <details className="columns">
                     <summary>
                         {cols.length} column evaluation{cols.length === 1 ? '' : 's'}
                     </summary>
                     {cols.map((c, i) => (
-                        <ColumnCard key={i} col={c} categories={colCats} />
+                        <ColumnCard key={i} col={c} categories={colCats}/>
                     ))}
                 </details>
             )}

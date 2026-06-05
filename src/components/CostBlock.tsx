@@ -1,15 +1,15 @@
-import type { ReactNode } from 'react'
-import type { DatasetResult, EvalMeta } from '@/types/eval'
-import type { RateInfo, UseRates } from '@/hooks/useRates'
-import { callCost, genRateKey, totalsFromResults } from '@/utils/pricing'
-import { fmtCost, fmtTokens } from '@/utils/format'
+import type {ReactNode} from 'react'
+import type {DatasetResult, EvalMeta} from '@/types/eval'
+import type {RateInfo, UseRates} from '@/hooks/useRates'
+import {callCost, genRateKey, totalsFromResults} from '@/utils/pricing'
+import {fmtCost, fmtTokens} from '@/utils/format'
 
 function RateInput({
-    label,
-    info,
-    onSet,
-    onClear,
-}: {
+                       label,
+                       info,
+                       onSet,
+                       onClear,
+                   }: {
     label: string
     info: RateInfo
     onSet: (value: string) => void
@@ -38,12 +38,12 @@ function RateInput({
 }
 
 function TokenRow({
-    label,
-    prompt,
-    completion,
-    cost,
-    estimate,
-}: {
+                      label,
+                      prompt,
+                      completion,
+                      cost,
+                      estimate,
+                  }: {
     label: ReactNode
     prompt: number
     completion: number
@@ -66,10 +66,10 @@ function TokenRow({
 }
 
 export function CostBlock({
-    results,
-    meta,
-    rates,
-}: {
+                              results,
+                              meta,
+                              rates,
+                          }: {
     results: DatasetResult[]
     meta: EvalMeta
     rates: UseRates
@@ -95,7 +95,7 @@ export function CostBlock({
         genPrompt += tok.prompt
         genCompletion += tok.completion
         genCost += cost
-        modelRows.push({ model, tok, cost, inInfo, outInfo })
+        modelRows.push({model, tok, cost, inInfo, outInfo})
     }
 
     const judgeInInfo = rates.resolve('judgeIn', judgeModel, 'input')
@@ -115,7 +115,7 @@ export function CostBlock({
         <>
             <h2 className="cost-heading">Token usage</h2>
             <div className="cost-controls">
-                {modelRows.map(({ model, inInfo, outInfo }) => (
+                {modelRows.map(({model, inInfo, outInfo}) => (
                     <div className="rate-group" key={model}>
                         <div className="rate-group-label" title={model}>
                             {model} $/1M
@@ -162,7 +162,7 @@ export function CostBlock({
                 </div>
             )}
             <div className="summary-grid">
-                {modelRows.map(({ model, tok, cost }) => (
+                {modelRows.map(({model, tok, cost}) => (
                     <TokenRow
                         key={model}
                         label={

@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react'
-import { lookupModelRate } from '@/utils/pricing'
+import {useCallback, useSyncExternalStore} from 'react'
+import {lookupModelRate} from '@/utils/pricing'
+import {getSettingsVersion, notifySettingsChanged, subscribeSettings,} from '@/utils/settingsStore'
 
 const LS_PREFIX = 'evalViewer.rate.'
 
@@ -19,21 +20,22 @@ export interface UseRates {
 }
 
 // Per-rate state lives in localStorage (keyed by rate key), matching the vanilla
-// viewer so saved rates survive reloads. A version counter forces a re-render
-// after writes so dependent components re-resolve.
+// viewer so saved rates survive reloads. Subscribing to the settings store forces
+// a re-render after any rate or custom-pricing change so dependent components
+// re-resolve — wherever the change originated (cost controls or Settings drawer).
 export function useRates(): UseRates {
-    const [, bump] = useState(0)
+    useSyncExternalStore(subscribeSettings, getSettingsVersion, getSettingsVersion)
 
     const setRate = useCallback((key: string, value: string) => {
         localStorage.setItem(LS_PREFIX + key, value)
         localStorage.setItem(LS_PREFIX + key + '.userSet', '1')
-        bump((n) => n + 1)
+        notifySettingsChanged()
     }, [])
 
     const clearRate = useCallback((key: string) => {
         localStorage.removeItem(LS_PREFIX + key)
         localStorage.removeItem(LS_PREFIX + key + '.userSet')
-        bump((n) => n + 1)
+        notifySettingsChanged()
     }, [])
 
     const resolve = useCallback(
@@ -41,7 +43,7 @@ export function useRates(): UseRates {
             const userSet = localStorage.getItem(LS_PREFIX + key + '.userSet') === '1'
             if (userSet) {
                 const raw = localStorage.getItem(LS_PREFIX + key) ?? ''
-                return { rate: parseFloat(raw) || 0, display: raw, autoFrom: '', userSet: true }
+                return {rate: parseFloat(raw) || 0, display: raw, autoFrom: '', userSet: true}
             }
             // Auto-derive from the model's pricing entry when available.
             const src = lookupModelRate(model)
@@ -55,10 +57,10 @@ export function useRates(): UseRates {
                 }
             }
             const raw = localStorage.getItem(LS_PREFIX + key) ?? ''
-            return { rate: parseFloat(raw) || 0, display: raw, autoFrom: '', userSet: false }
+            return {rate: parseFloat(raw) || 0, display: raw, autoFrom: '', userSet: false}
         },
         [],
     )
 
-    return { resolve, setRate, clearRate }
+    return {resolve, setRate, clearRate}
 }

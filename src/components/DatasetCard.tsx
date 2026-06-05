@@ -1,15 +1,15 @@
-import type { Category, DatasetResult, EvalMeta } from '@/types/eval'
-import type { UseRates } from '@/hooks/useRates'
-import { modelEvalsOf } from '@/utils/resultShape'
-import { ModelEvalBlock } from '@/components/ModelEvalBlock'
+import type {Category, DatasetResult, EvalMeta} from '@/types/eval'
+import type {UseRates} from '@/hooks/useRates'
+import {modelEvalsOf} from '@/utils/resultShape'
+import {ModelEvalBlock} from '@/components/ModelEvalBlock'
 
 export function DatasetCard({
-    r,
-    dsCats,
-    colCats,
-    meta,
-    rates,
-}: {
+                                r,
+                                dsCats,
+                                colCats,
+                                meta,
+                                rates,
+                            }: {
     r: DatasetResult
     dsCats: Category[]
     colCats: Category[]

@@ -1,15 +1,17 @@
-import { type ChangeEvent, useState } from 'react'
-import { useEvalStream } from '@/hooks/useEvalStream'
-import { useRates } from '@/hooks/useRates'
-import { MetaStrip } from '@/components/MetaStrip'
-import { ResultsView } from '@/components/ResultsView'
-import { RunPanel } from '@/components/RunPanel'
-import { downloadJson, loadJsonFile } from '@/utils/fileIo'
+import {type ChangeEvent, useState} from 'react'
+import {useEvalStream} from '@/hooks/useEvalStream'
+import {useRates} from '@/hooks/useRates'
+import {MetaStrip} from '@/components/MetaStrip'
+import {ResultsView} from '@/components/ResultsView'
+import {RunPanel} from '@/components/RunPanel'
+import {SettingsPanel} from '@/components/SettingsPanel'
+import {downloadJson, loadJsonFile} from '@/utils/fileIo'
 
 export default function App() {
-    const { running, status, data, setData, setStatus, run, cancel } = useEvalStream()
+    const {running, status, data, setData, setStatus, run, cancel} = useEvalStream()
     const rates = useRates()
     const [showPanel, setShowPanel] = useState(false)
+    const [showSettings, setShowSettings] = useState(false)
 
     const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0]
@@ -17,9 +19,9 @@ export default function App() {
         try {
             const parsed = await loadJsonFile(f)
             setData(parsed)
-            setStatus({ msg: '', error: false })
+            setStatus({msg: '', error: false})
         } catch (err) {
-            setStatus({ msg: `Failed to parse JSON: ${(err as Error).message}`, error: true })
+            setStatus({msg: `Failed to parse JSON: ${(err as Error).message}`, error: true})
         }
         e.target.value = '' // allow re-loading the same file
     }
@@ -33,7 +35,7 @@ export default function App() {
                 <h1>Metadata Eval Viewer</h1>
                 <label className="file-btn">
                     Load results…
-                    <input type="file" accept=".json" hidden onChange={onFile} />
+                    <input type="file" accept=".json" hidden onChange={onFile}/>
                 </label>
                 <button type="button" className="run-btn" onClick={() => setShowPanel((s) => !s)}>
                     Run new eval…
@@ -46,8 +48,17 @@ export default function App() {
                 >
                     Save results…
                 </button>
-                {data && <MetaStrip data={data} />}
-                {showPanel && <RunPanel running={running} onRun={run} onCancel={cancel} />}
+                {data && <MetaStrip data={data}/>}
+                <button
+                    type="button"
+                    className="run-btn settings-btn"
+                    aria-label="Open settings"
+                    aria-expanded={showSettings}
+                    onClick={() => setShowSettings(true)}
+                >
+                    ⚙ Settings
+                </button>
+                {showPanel && <RunPanel running={running} onRun={run} onCancel={cancel}/>}
                 {(status.msg || running) && (
                     <div className={`run-status${status.error ? ' run-error' : ''}`}>
                         {status.msg}
@@ -56,7 +67,7 @@ export default function App() {
             </header>
             <main>
                 {hasResults ? (
-                    <ResultsView data={data!} rates={rates} />
+                    <ResultsView data={data!} rates={rates}/>
                 ) : (
                     <div className="empty">
                         {running ? (
@@ -70,6 +81,7 @@ export default function App() {
                     </div>
                 )}
             </main>
+            {showSettings && <SettingsPanel onClose={() => setShowSettings(false)}/>}
         </>
     )
 }
