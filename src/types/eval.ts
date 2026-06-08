@@ -25,6 +25,26 @@ export interface PromptOverrides {
     column?: string
 }
 
+// A named generation-prompt set, used to compare prompts side by side. Blank
+// fields fall back to the resolved default template.
+export interface PromptVariant {
+    name: string
+    system?: string
+    dataset?: string
+    column?: string
+}
+
+// A dataset supplied by the client (e.g. parsed from an Improvement-tool export).
+// The eval still loads it live from Socrata by `uid`; the description/column map
+// carry the existing curated metadata to validate.
+export interface ImportedDataset {
+    uid: string
+    name?: string
+    description?: string
+    columnDescriptions?: Record<string, string>
+    domain?: string
+}
+
 // GET /api/eval/defaults — the resolved default prompts + judge metrics, used to
 // pre-fill the Settings editors.
 export interface EvalDefaults {
@@ -61,7 +81,8 @@ export interface Judgment {
 }
 
 export interface DatasetEvaluation {
-    gold_description?: string
+    // null in absolute (no-gold) scoring; a string only in head-to-head runs.
+    gold_description?: string | null
     generated_description?: string
     judgment?: Judgment
 }
@@ -69,13 +90,23 @@ export interface DatasetEvaluation {
 export interface ColumnEvaluation {
     display_name: string
     data_type: string
-    gold_description?: string
+    gold_description?: string | null
     generated_description?: string
     judgment?: Judgment
 }
 
+// What a candidate's metadata came from: a fresh generation, or existing
+// human metadata (live on the portal, or imported/curated).
+export type CandidateKind = 'generated' | 'existing-live' | 'existing-imported'
+
 export interface ModelEvaluation {
+    // Display/grouping label for this candidate column. For generated candidates
+    // it's the model name (or `model · variant` when prompts vary); for existing
+    // metadata it's a fixed label like "data.wa.gov (live)".
     generator_model: string
+    candidate_kind?: CandidateKind
+    base_model?: string | null
+    prompt_variant?: string | null
     dataset_evaluation?: DatasetEvaluation
     column_evaluations?: ColumnEvaluation[]
     tokens?: Tokens
@@ -100,9 +131,14 @@ export interface DatasetResult {
 export interface EvalMeta {
     generator_models?: string[]
     generator_model?: string
+    prompt_variants?: string[]
     judge_model?: string
     generated_at?: string
     prompts_source?: string
+    compare_gold?: boolean
+    evaluate_live?: boolean
+    evaluate_imported?: boolean
+    dataset_source?: string
     scoring_categories_dataset?: Category[]
     scoring_categories_column?: Category[]
 }
@@ -117,8 +153,18 @@ export interface EvalRunRequest {
     datasetLimit: number
     evalColumns: boolean
     maxColumnsPerDataset: number
+    // Dataset source: explicit Socrata UIDs, or imported datasets carrying their
+    // UID + curated metadata. When both omitted, the backend uses its CSV.
+    datasetIds?: string[]
+    importedDatasets?: ImportedDataset[]
+    // Generation axes. generatorModels may be empty (evaluate existing only).
     generatorModels?: string[]
+    promptVariants?: PromptVariant[]
     judgeModel?: string
+    // Candidate / comparison toggles.
+    evaluateLive?: boolean
+    evaluateImported?: boolean
+    compareGold?: boolean
     // Per-run overrides from the Settings drawer; omitted → backend defaults.
     prompts?: PromptOverrides
     scoringCategoriesDataset?: ScoringCategory[]
@@ -130,9 +176,14 @@ export interface StartEvent {
     type: 'start'
     total: number
     generator_models?: string[]
+    prompt_variants?: string[]
     judge_model?: string
     started_at?: string
     prompts_source?: string
+    compare_gold?: boolean
+    evaluate_live?: boolean
+    evaluate_imported?: boolean
+    dataset_source?: string
     scoring_categories_dataset?: Category[]
     scoring_categories_column?: Category[]
 }

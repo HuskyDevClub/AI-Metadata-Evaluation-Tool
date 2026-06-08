@@ -1,4 +1,4 @@
-import type {Category, ModelEvaluation} from '@/types/eval'
+import type {CandidateKind, Category, ModelEvaluation} from '@/types/eval'
 import type {UseRates} from '@/hooks/useRates'
 import {callCost, genRateKey, splitTokens} from '@/utils/pricing'
 import {fmtCost, fmtTokens} from '@/utils/format'
@@ -8,7 +8,20 @@ import {ReasoningBlock} from '@/components/ReasoningBlock'
 import {ScoresBlock} from '@/components/ScoresBlock'
 import {WinnerBadge} from '@/components/WinnerBadge'
 
-// One generator model's evaluation of a dataset (gold vs that model's output).
+// The "AI-generated" block label per candidate kind.
+const GEN_LABEL: Record<CandidateKind, string> = {
+    generated: 'AI-generated',
+    'existing-live': 'Live (data.wa.gov)',
+    'existing-imported': 'Imported (curated)',
+}
+const KIND_BADGE: Record<CandidateKind, string> = {
+    generated: '',
+    'existing-live': 'existing · live',
+    'existing-imported': 'existing · imported',
+}
+
+// One candidate's evaluation of a dataset: a generated description judged against
+// gold (head-to-head), or any description scored on its own (absolute).
 export function ModelEvalBlock({
                                    me,
                                    dsCats,
@@ -25,6 +38,8 @@ export function ModelEvalBlock({
     const j = me.dataset_evaluation?.judgment ?? {}
     const cols = me.column_evaluations ?? []
     const tok = me.tokens || {}
+    const kind: CandidateKind = me.candidate_kind ?? 'generated'
+    const isGenerated = kind === 'generated'
     const dsGen = splitTokens(tok.dataset_generation)
     const colGen = splitTokens(tok.column_generation)
     const dsJud = splitTokens(tok.dataset_judge)
@@ -36,9 +51,9 @@ export function ModelEvalBlock({
     const judgeCompletion = dsJud.completion + colJud.completion
     const genTokens = genPrompt + genCompletion
     const judgeTokens = judgePrompt + judgeCompletion
-    const model = me.generator_model || '(generator)'
-    const genIn = rates.resolve(genRateKey(model, 'In'), model, 'input').rate
-    const genOut = rates.resolve(genRateKey(model, 'Out'), model, 'output').rate
+    const label = me.generator_model || '(candidate)'
+    const genIn = rates.resolve(genRateKey(label, 'In'), me.base_model || label, 'input').rate
+    const genOut = rates.resolve(genRateKey(label, 'Out'), me.base_model || label, 'output').rate
     const judgeIn = rates.resolve('judgeIn', judgeModel, 'input').rate
     const judgeOut = rates.resolve('judgeOut', judgeModel, 'output').rate
     const rowCost =
@@ -47,11 +62,20 @@ export function ModelEvalBlock({
     return (
         <div className="model-eval">
             <h3 className="model-eval-head">
-                <span className="model-eval-name">{model}</span>
-                <WinnerBadge winner={j.winner}/>
+                <span className="model-eval-name">{label}</span>
+                {KIND_BADGE[kind] && <span className="kind-badge">{KIND_BADGE[kind]}</span>}
+                {j.winner && <WinnerBadge winner={j.winner}/>}
                 <span className="tokens-strip">
-                    gen <b>{fmtTokens(genTokens)}</b> + judge <b>{fmtTokens(judgeTokens)}</b> ={' '}
-                    <b>{fmtTokens(genTokens + judgeTokens)}</b> tok
+                    {isGenerated ? (
+                        <>
+                            gen <b>{fmtTokens(genTokens)}</b> + judge <b>{fmtTokens(judgeTokens)}</b> ={' '}
+                            <b>{fmtTokens(genTokens + judgeTokens)}</b> tok
+                        </>
+                    ) : (
+                        <>
+                            judge <b>{fmtTokens(judgeTokens)}</b> tok
+                        </>
+                    )}
                     {rowCost > 0 && (
                         <>
                             {' · '}
@@ -64,8 +88,10 @@ export function ModelEvalBlock({
                 )}
             </h3>
             <DescPair
-                gold={me.dataset_evaluation?.gold_description}
+                gold={me.dataset_evaluation?.gold_description ?? undefined}
                 gen={me.dataset_evaluation?.generated_description}
+                goldLabel="Gold (live)"
+                genLabel={GEN_LABEL[kind]}
             />
             <ScoresBlock judgment={j} categories={dsCats}/>
             <ReasoningBlock judgment={j}/>
@@ -75,7 +101,7 @@ export function ModelEvalBlock({
                         {cols.length} column evaluation{cols.length === 1 ? '' : 's'}
                     </summary>
                     {cols.map((c, i) => (
-                        <ColumnCard key={i} col={c} categories={colCats}/>
+                        <ColumnCard key={i} col={c} categories={colCats} kind={kind}/>
                     ))}
                 </details>
             )}

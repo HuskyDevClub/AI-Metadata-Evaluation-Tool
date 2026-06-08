@@ -1,9 +1,18 @@
 import type {Judgment} from '@/types/eval'
 
-export function ReasoningBlock({judgment}: { judgment?: Judgment }) {
+export function ReasoningBlock({
+                                   judgment,
+                                   genLabel = 'AI reasoning',
+                               }: {
+    judgment?: Judgment
+    genLabel?: string
+}) {
     const goldReasoning = judgment?.candidate1?.reasoning
     const aiReasoning = judgment?.candidate2?.reasoning
     const winnerReasoning = judgment?.winnerReasoning
+    // With no gold candidate (absolute scoring), drop the colored dot so the
+    // single reasoning block doesn't imply a comparison.
+    const solo = !judgment?.candidate1
     return (
         <>
             {winnerReasoning && (
@@ -23,7 +32,7 @@ export function ReasoningBlock({judgment}: { judgment?: Judgment }) {
             {aiReasoning && (
                 <div className="reasoning">
                     <div className="label">
-                        <span className="dot dot-2"/> AI reasoning
+                        {!solo && <span className="dot dot-2"/>} {solo ? 'Reasoning' : genLabel}
                     </div>
                     {aiReasoning}
                 </div>

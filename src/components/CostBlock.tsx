@@ -89,6 +89,9 @@ export function CostBlock({
     let genCompletion = 0
     let genCost = 0
     for (const [model, tok] of t.perModel) {
+        // Existing-metadata candidates aren't generated, so they have no
+        // generation tokens and no generator rate to set — skip them here.
+        if (tok.prompt + tok.completion === 0) continue
         const inInfo = rates.resolve(genRateKey(model, 'In'), model, 'input')
         const outInfo = rates.resolve(genRateKey(model, 'Out'), model, 'output')
         const cost = callCost(tok.prompt, tok.completion, inInfo.rate, outInfo.rate)

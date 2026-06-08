@@ -58,13 +58,20 @@ export default function App() {
                 >
                     ⚙ Settings
                 </button>
-                {showPanel && <RunPanel running={running} onRun={run} onCancel={cancel}/>}
                 {(status.msg || running) && (
                     <div className={`run-status${status.error ? ' run-error' : ''}`}>
                         {status.msg}
                     </div>
                 )}
             </header>
+            {showPanel && (
+                <RunPanel
+                    running={running}
+                    onRun={run}
+                    onCancel={cancel}
+                    onClose={() => setShowPanel(false)}
+                />
+            )}
             <main>
                 {hasResults ? (
                     <ResultsView data={data!} rates={rates}/>

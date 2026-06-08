@@ -2,8 +2,9 @@
 // in localStorage (under the evalViewer.* prefix so a reset clears them) and
 // merged into the run request when an eval is launched from the Run panel.
 
-import type {EvalDefaults, EvalRunRequest, PromptOverrides, ScoringCategory} from '@/types/eval'
+import type {EvalDefaults, EvalRunRequest, PromptOverrides, PromptVariant, ScoringCategory,} from '@/types/eval'
 import {getApiBaseUrl} from '@/utils/config'
+import {RUN_DEFAULTS, RUN_LS} from '@/utils/runDefaults'
 
 export type ScoringLevel = 'dataset' | 'column'
 
@@ -81,6 +82,67 @@ export function validScoring(cats: ScoringCategory[]): ScoringCategory[] {
             }
         })
         .filter((c) => KEY_RE.test(c.key) && c.label.length > 0)
+}
+
+// --- Prompt variants (compare prompts) --------------------------------------
+// A named prompt set the run can compare. `enabled` selects it for the run; any
+// blank override falls back to the resolved default template. The implicit
+// "Default" variant (the Settings prompts) is tracked by its own on/off flag.
+export interface StoredVariant {
+    name: string
+    enabled: boolean
+    system?: string
+    dataset?: string
+    column?: string
+}
+
+export function getVariants(): StoredVariant[] {
+    const arr = readJson<StoredVariant[]>(RUN_LS.variants)
+    if (!Array.isArray(arr)) return []
+    return arr.map((v) => ({
+        name: typeof v.name === 'string' ? v.name : '',
+        enabled: v.enabled !== false,
+        system: v.system,
+        dataset: v.dataset,
+        column: v.column,
+    }))
+}
+
+export function setVariants(list: StoredVariant[]): void {
+    if (list.length) localStorage.setItem(RUN_LS.variants, JSON.stringify(list))
+    else localStorage.removeItem(RUN_LS.variants)
+}
+
+export function getDefaultVariantOn(): boolean {
+    const raw = localStorage.getItem(RUN_LS.defaultVariant)
+    return raw === null ? RUN_DEFAULTS.defaultVariant : raw === '1'
+}
+
+export function setDefaultVariantOn(on: boolean): void {
+    localStorage.setItem(RUN_LS.defaultVariant, on ? '1' : '0')
+}
+
+// Build the promptVariants run payload from the stored selection. Returns
+// undefined when only the Default variant is active (so the backend runs its
+// single default prompt and doesn't tag candidates with a variant name).
+export function buildPromptVariants(): PromptVariant[] | undefined {
+    const out: PromptVariant[] = []
+    if (getDefaultVariantOn()) out.push({name: 'Default'})
+    for (const v of getVariants()) {
+        const name = v.name.trim()
+        if (!v.enabled || !name) continue
+        const variant: PromptVariant = {name}
+        for (const k of ['system', 'dataset', 'column'] as const) {
+            const text = (v[k] ?? '').trim()
+            if (text) variant[k] = v[k]
+        }
+        out.push(variant)
+    }
+    // A lone Default → let the backend use its single default prompt.
+    if (out.length <= 1 && (out.length === 0 || out[0].name === 'Default')) {
+        return undefined
+    }
+    return out
 }
 
 // --- Fetch defaults ---------------------------------------------------------

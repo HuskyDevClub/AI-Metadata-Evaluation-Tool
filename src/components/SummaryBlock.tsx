@@ -37,6 +37,9 @@ export function SummaryBlock({
     }
 
     let datasetCount = 0
+    // Gold column + winner tallies only apply to head-to-head (compare-vs-gold)
+    // candidates. Pure absolute-scoring runs have no candidate1.
+    let hasGold = false
     for (const r of results) {
         if (r?.error) continue
         datasetCount++
@@ -45,8 +48,11 @@ export function SummaryBlock({
             if (!acc) continue
             const j = me.dataset_evaluation?.judgment
             if (!j) continue
-            const w = j.winner ?? 'unknown'
-            acc.winners[w] = (acc.winners[w] ?? 0) + 1
+            if (j.candidate1) {
+                hasGold = true
+                const w = j.winner ?? 'unknown'
+                acc.winners[w] = (acc.winners[w] ?? 0) + 1
+            }
             for (const c of categories) {
                 const v1 = j.candidate1?.[c.key]
                 const v2 = j.candidate2?.[c.key]
@@ -64,7 +70,12 @@ export function SummaryBlock({
         goldAvg[c.key] = avg(all)
     }
 
-    const modelNote = models.length > 1 ? `, ${models.length} generator models` : ''
+    const variants = meta.prompt_variants ?? []
+    const notes: string[] = []
+    if (models.length > 1) notes.push(`${models.length} candidates`)
+    if (variants.length > 1) notes.push(`${variants.length} prompt variants`)
+    const modelNote = notes.length ? `, ${notes.join(', ')}` : ''
+    const colSpanLabel = hasGold ? 'col-gen' : 'model-name'
 
     return (
         <div className="summary">
@@ -73,32 +84,36 @@ export function SummaryBlock({
                 {datasetCount === 1 ? '' : 's'}
                 {modelNote})
             </h2>
-            <div className="model-winners">
-                {models.map((m) => {
-                    const w = perModel.get(m)!.winners
-                    return (
-                        <div className="model-winners-row" key={m}>
-                            <span className="model-name">{m}</span>
-                            <WinnerBadge winner="1"/> {w['1']}
-                            <WinnerBadge winner="2"/> {w['2']}
-                            <WinnerBadge winner="tie"/> {w['tie']}
-                            {w['unknown'] ? (
-                                <>
-                                    <span className="winner-badge winner-tie">Unknown</span>{' '}
-                                    {w['unknown']}
-                                </>
-                            ) : null}
-                        </div>
-                    )
-                })}
-            </div>
+            {hasGold && (
+                <div className="model-winners">
+                    {models.map((m) => {
+                        const w = perModel.get(m)!.winners
+                        // Existing-metadata candidates have no winner tally; skip them.
+                        if (!w['1'] && !w['2'] && !w['tie'] && !w['unknown']) return null
+                        return (
+                            <div className="model-winners-row" key={m}>
+                                <span className="model-name">{m}</span>
+                                <WinnerBadge winner="1"/> {w['1']}
+                                <WinnerBadge winner="2"/> {w['2']}
+                                <WinnerBadge winner="tie"/> {w['tie']}
+                                {w['unknown'] ? (
+                                    <>
+                                        <span className="winner-badge winner-tie">Unknown</span>{' '}
+                                        {w['unknown']}
+                                    </>
+                                ) : null}
+                            </div>
+                        )
+                    })}
+                </div>
+            )}
             <table className="summary-table">
                 <thead>
                 <tr>
                     <th>Category</th>
-                    <th className="col-gold">Gold</th>
+                    {hasGold && <th className="col-gold">Gold</th>}
                     {models.map((m) => (
-                        <th className="model-name col-gen" key={m}>
+                        <th className={`model-name ${colSpanLabel}`} key={m}>
                             {m}
                         </th>
                     ))}
@@ -112,9 +127,11 @@ export function SummaryBlock({
                     return (
                         <tr key={c.key}>
                             <td>{c.label}</td>
-                            <td className="col-gold">{g !== null ? g.toFixed(2) : '–'}</td>
+                            {hasGold && (
+                                <td className="col-gold">{g !== null ? g.toFixed(2) : '–'}</td>
+                            )}
                             {modelAvgs.map((a, i) => {
-                                const delta = g !== null && a !== null ? a - g : null
+                                const delta = hasGold && g !== null && a !== null ? a - g : null
                                 const dClass =
                                     delta === null
                                         ? 'delta-zero'

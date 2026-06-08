@@ -76,24 +76,28 @@ export function useEvalStream(): UseEvalStream {
 
         const handle = (evt: RunEvent) => {
             switch (evt.type) {
-                case 'start':
+                case 'start': {
                     runState.meta = {
                         generator_models: evt.generator_models,
+                        prompt_variants: evt.prompt_variants,
                         judge_model: evt.judge_model,
                         generated_at: evt.started_at,
                         prompts_source: evt.prompts_source,
+                        compare_gold: evt.compare_gold,
+                        evaluate_live: evt.evaluate_live,
+                        evaluate_imported: evt.evaluate_imported,
+                        dataset_source: evt.dataset_source,
                         scoring_categories_dataset: evt.scoring_categories_dataset,
                         scoring_categories_column: evt.scoring_categories_column,
                     }
-                    setStatus({
-                        msg:
-                            `Starting — ${evt.total} dataset${evt.total === 1 ? '' : 's'}` +
-                            ((evt.generator_models?.length ?? 0) > 1
-                                ? ` × ${evt.generator_models!.length} models`
-                                : ''),
-                        error: false,
-                    })
+                    const nModels = evt.generator_models?.length ?? 0
+                    const nVariants = evt.prompt_variants?.length ?? 0
+                    const bits = [`${evt.total} dataset${evt.total === 1 ? '' : 's'}`]
+                    if (nModels > 1) bits.push(`${nModels} models`)
+                    if (nVariants > 1) bits.push(`${nVariants} prompts`)
+                    setStatus({msg: `Starting — ${bits.join(' × ')}`, error: false})
                     break
+                }
                 case 'dataset_start':
                     runState.currentDatasetLabel = `[${evt.i}/${evt.total}] ${evt.id}`
                     setStatus({msg: `${runState.currentDatasetLabel} — fetching…`, error: false})
