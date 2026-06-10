@@ -453,6 +453,37 @@ details.columns summary:hover {
     font-weight: 400;
 }
 
+/* A column an existing-metadata candidate never described — flagged so the
+   user can add a description rather than silently skipping it. */
+.column-missing {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.missing-badge {
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: #fde68a;
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.missing-note {
+    margin: 0;
+    font-size: 13px;
+    color: #92400e;
+}
+
+.missing-count {
+    color: #92400e;
+    font-weight: 500;
+}
+
 /* Per-model sub-block inside a dataset card (multi-generator runs) */
 .model-eval {
     margin-top: 16px;

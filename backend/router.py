@@ -1052,6 +1052,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                     return val.strip()
                                 return (col.get("description") or "").strip()
 
+                            missing_cols: list[dict[str, Any]] = []
                             if spec.kind == "generated":
                                 if compare_gold:
                                     # Only columns with a live gold to compare to.
@@ -1059,9 +1060,11 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                 else:
                                     scoped = list(cols)
                             else:
-                                # Existing candidates: only columns that actually
-                                # have existing text to score.
+                                # Existing candidates: score columns that have
+                                # text, and surface the ones with an empty
+                                # description so the user knows to add one.
                                 scoped = [c for c in cols if col_gold(c)]
+                                missing_cols = [c for c in cols if not col_gold(c)]
 
                             scored_total = len(scoped)
                             scored_count = 0
@@ -1172,6 +1175,22 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                         "gold_description": col_gold_out,
                                         "generated_description": col_text,
                                         "judgment": col_judgment,
+                                    }
+                                )
+
+                            # Columns the existing metadata never described — emit
+                            # a marker (no judge call) so the UI can flag them and
+                            # prompt the user to add a description.
+                            for col in missing_cols:
+                                column_evals.append(
+                                    {
+                                        "field_name": col["fieldName"],
+                                        "display_name": col["name"],
+                                        "data_type": col["dataType"],
+                                        "gold_description": None,
+                                        "generated_description": "",
+                                        "judgment": {},
+                                        "missing_description": True,
                                     }
                                 )
 

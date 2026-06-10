@@ -10,6 +10,15 @@ const GEN_LABEL: Record<CandidateKind, string> = {
     'existing-imported': 'Imported (curated)',
 }
 
+// Shown when an existing-metadata candidate has no description for a column.
+const MISSING_NOTE: Record<CandidateKind, string> = {
+    generated: 'No description for this column.',
+    'existing-live':
+        'No description published on data.wa.gov for this column. Add one so it can be evaluated.',
+    'existing-imported':
+        'No description in the imported metadata for this column. Add one so it can be evaluated.',
+}
+
 export function ColumnCard({
                                col,
                                categories,
@@ -19,6 +28,17 @@ export function ColumnCard({
     categories: Category[]
     kind?: CandidateKind
 }) {
+    if (col.missing_description) {
+        return (
+            <div className="column-eval column-missing">
+                <h3>
+                    {col.display_name} <span className="column-type">— {col.data_type}</span>
+                    <span className="missing-badge">no description</span>
+                </h3>
+                <p className="missing-note">{MISSING_NOTE[kind]}</p>
+            </div>
+        )
+    }
     const j = col.judgment ?? {}
     return (
         <div className="column-eval">

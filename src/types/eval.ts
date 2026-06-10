@@ -93,6 +93,9 @@ export interface ColumnEvaluation {
     gold_description?: string | null
     generated_description?: string
     judgment?: Judgment
+    // True when an existing-metadata candidate has no description for this
+    // column. The column isn't judged; the UI flags it so the user can add one.
+    missing_description?: boolean
 }
 
 // What a candidate's metadata came from: a fresh generation, or existing

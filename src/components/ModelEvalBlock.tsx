@@ -37,6 +37,8 @@ export function ModelEvalBlock({
 }) {
     const j = me.dataset_evaluation?.judgment ?? {}
     const cols = me.column_evaluations ?? []
+    const missingCols = cols.filter((c) => c.missing_description).length
+    const scoredCols = cols.length - missingCols
     const tok = me.tokens || {}
     const kind: CandidateKind = me.candidate_kind ?? 'generated'
     const isGenerated = kind === 'generated'
@@ -98,7 +100,12 @@ export function ModelEvalBlock({
             {cols.length > 0 && (
                 <details className="columns">
                     <summary>
-                        {cols.length} column evaluation{cols.length === 1 ? '' : 's'}
+                        {scoredCols} column evaluation{scoredCols === 1 ? '' : 's'}
+                        {missingCols > 0 && (
+                            <span className="missing-count">
+                                {' '}· {missingCols} missing description{missingCols === 1 ? '' : 's'}
+                            </span>
+                        )}
                     </summary>
                     {cols.map((c, i) => (
                         <ColumnCard key={i} col={c} categories={colCats} kind={kind}/>
