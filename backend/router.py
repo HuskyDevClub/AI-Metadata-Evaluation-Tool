@@ -1030,7 +1030,12 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                         column_evals: list[dict[str, Any]] = []
                         if request.evalColumns:
                             cols = ds["columns"]
-                            if request.maxColumnsPerDataset is not None:
+                            # A positive cap trims the list; -1 (or any
+                            # non-positive value) means evaluate every column.
+                            if (
+                                request.maxColumnsPerDataset is not None
+                                and request.maxColumnsPerDataset > 0
+                            ):
                                 cols = cols[: request.maxColumnsPerDataset]
 
                             # Which columns are in scope, and the existing

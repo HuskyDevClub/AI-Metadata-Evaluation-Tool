@@ -30,7 +30,7 @@ export type RunGoal = 'validate' | 'generate'
 export const RUN_DEFAULTS = {
     limit: 5,
     evalColumns: true,
-    maxCols: 8,
+    maxCols: -1, // -1 = evaluate every column the dataset has
     source: 'csv' as RunSource,
     goal: 'generate' as RunGoal,
     evalLive: true, // when validating, the live description is the obvious target

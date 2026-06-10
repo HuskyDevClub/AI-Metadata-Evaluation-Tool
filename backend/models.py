@@ -85,7 +85,8 @@ class EvalRunRequest(BaseModel):
 
     datasetLimit: int | None = Field(default=5, ge=1, le=200)
     evalColumns: bool = True
-    maxColumnsPerDataset: int | None = Field(default=8, ge=1, le=100)
+    # -1 (or any non-positive value) means "evaluate every column".
+    maxColumnsPerDataset: int | None = Field(default=-1, ge=-1, le=100)
 
     # --- Dataset source (first non-empty wins; else the bundled CSV) ----------
     # Explicit Socrata UIDs, or datasets imported from the Improvement tool's

@@ -501,10 +501,10 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
                         Evaluate columns
                     </label>
                     <label className="settings-field">
-                        Max columns / dataset
+                        Max columns / dataset (-1 = all)
                         <input
                             type="number"
-                            min={1}
+                            min={-1}
                             max={100}
                             value={maxCols}
                             disabled={!evalCols}
