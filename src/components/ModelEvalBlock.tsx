@@ -2,6 +2,7 @@ import type {CandidateKind, Category, ModelEvaluation} from '@/types/eval'
 import type {UseRates} from '@/hooks/useRates'
 import {callCost, genRateKey, splitTokens} from '@/utils/pricing'
 import {fmtCost, fmtTokens} from '@/utils/format'
+import {ChecksBlock} from '@/components/ChecksBlock'
 import {ColumnCard} from '@/components/ColumnCard'
 import {DescPair} from '@/components/DescPair'
 import {ReasoningBlock} from '@/components/ReasoningBlock'
@@ -96,6 +97,7 @@ export function ModelEvalBlock({
                 genLabel={GEN_LABEL[kind]}
             />
             <ScoresBlock judgment={j} categories={dsCats}/>
+            <ChecksBlock checks={me.dataset_evaluation?.deterministic_checks}/>
             <ReasoningBlock judgment={j}/>
             {cols.length > 0 && (
                 <details className="columns">

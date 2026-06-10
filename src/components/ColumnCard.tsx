@@ -1,4 +1,5 @@
 import type {CandidateKind, Category, ColumnEvaluation} from '@/types/eval'
+import {ChecksBlock} from '@/components/ChecksBlock'
 import {DescPair} from '@/components/DescPair'
 import {ReasoningBlock} from '@/components/ReasoningBlock'
 import {ScoresBlock} from '@/components/ScoresBlock'
@@ -53,6 +54,7 @@ export function ColumnCard({
                 genLabel={GEN_LABEL[kind]}
             />
             <ScoresBlock judgment={j} categories={categories}/>
+            <ChecksBlock checks={col.deterministic_checks}/>
             <ReasoningBlock judgment={j}/>
         </div>
     )

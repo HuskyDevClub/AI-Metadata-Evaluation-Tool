@@ -70,7 +70,11 @@ export interface CandidateScores {
     reasoning?: string
 
     // Per-category integer scores (0–10), keyed by Category.key.
-    [categoryKey: string]: number | string | undefined
+    // Per-category max−min spread across self-consistency samples (judgeSamples
+    // > 1), keyed by Category.key. A noise estimate: high spread = unstable.
+    score_spread?: Record<string, number>
+
+    [categoryKey: string]: number | string | Record<string, number> | undefined
 }
 
 export interface Judgment {
@@ -78,6 +82,34 @@ export interface Judgment {
     winnerReasoning?: string
     candidate1?: CandidateScores
     candidate2?: CandidateScores
+    // Number of judge samples aggregated (median) when self-consistency is on.
+    judge_samples?: number
+    // Present only when nothing parsed.
+    error?: string
+}
+
+// Deterministic, code-based quality metrics computed in backend/quality_checks.py
+// — the objective WA plain-language / formatting rules, scored without the LLM.
+// `flags` values are true when the rule is VIOLATED.
+export interface DeterministicChecks {
+    word_count: number
+    word_target: [number, number]
+    sentence_count: number
+    avg_sentence_words: number
+    max_sentence_words: number
+    long_sentences: number
+    flesch_reading_ease: number
+    flesch_kincaid_grade: number
+    unexpanded_acronyms: string[]
+    deadly7_count: number
+    deadly7_sentence_ratio: number
+    passive_sentence_ratio: number
+    jargon_hits: string[]
+    paragraph_count: number
+    has_bullets: boolean
+    generic_opening: boolean
+    flags: Record<string, boolean>
+    violation_count: number
 }
 
 export interface DatasetEvaluation {
@@ -85,6 +117,7 @@ export interface DatasetEvaluation {
     gold_description?: string | null
     generated_description?: string
     judgment?: Judgment
+    deterministic_checks?: DeterministicChecks
 }
 
 export interface ColumnEvaluation {
@@ -93,6 +126,7 @@ export interface ColumnEvaluation {
     gold_description?: string | null
     generated_description?: string
     judgment?: Judgment
+    deterministic_checks?: DeterministicChecks
     // True when an existing-metadata candidate has no description for this
     // column. The column isn't judged; the UI flags it so the user can add one.
     missing_description?: boolean
@@ -141,6 +175,8 @@ export interface EvalMeta {
     compare_gold?: boolean
     evaluate_live?: boolean
     evaluate_imported?: boolean
+    judge_samples?: number
+    randomize_judge_order?: boolean
     dataset_source?: string
     scoring_categories_dataset?: Category[]
     scoring_categories_column?: Category[]
@@ -164,6 +200,11 @@ export interface EvalRunRequest {
     generatorModels?: string[]
     promptVariants?: PromptVariant[]
     judgeModel?: string
+    // Judge reliability. judgeSamples > 1 runs the judge N times and takes the
+    // per-category median (self-consistency); 1 (default) runs once at temp 0.
+    // randomizeJudgeOrder blinds + shuffles candidate order in head-to-head.
+    judgeSamples?: number
+    randomizeJudgeOrder?: boolean
     // Candidate / comparison toggles.
     evaluateLive?: boolean
     evaluateImported?: boolean

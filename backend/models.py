@@ -103,6 +103,19 @@ class EvalRunRequest(BaseModel):
     promptVariants: list[PromptVariant] | None = Field(default=None, max_length=10)
     judgeModel: str | None = Field(default=None, max_length=200)
 
+    # --- Judge reliability controls -------------------------------------------
+    # Self-consistency: how many times to run the judge per item. 1 (default)
+    # runs the judge once at temperature 0 (deterministic, reproducible). >1
+    # runs it at a low non-zero temperature and aggregates per-category scores by
+    # median, which reduces run-to-run variance and yields a noise estimate
+    # (score spread) at the cost of extra judge calls.
+    judgeSamples: int = Field(default=1, ge=1, le=7)
+    # Blind the head-to-head judge to which candidate is the curated "gold" and
+    # randomize candidate order to remove position + label bias. The response is
+    # always remapped back to (candidate1 = gold, candidate2 = generated), so
+    # this is invisible downstream.
+    randomizeJudgeOrder: bool = True
+
     # --- What to evaluate / how to compare ------------------------------------
     # Score the existing metadata as its own candidate (no generation).
     evaluateLive: bool = False  # the live data.wa.gov description
