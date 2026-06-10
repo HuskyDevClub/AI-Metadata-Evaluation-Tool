@@ -55,10 +55,10 @@ rate limits when fetching dataset metadata.
 Run both servers together:
 
 ```bash
-npm run dev:all   # backend on :8000, Vite dev server on :5173
+npm run dev:all   # backend on :8001, Vite dev server on :5174
 ```
 
-Then open **http://localhost:5173**. Vite proxies `/api/*` to the backend, so the
+Then open **http://localhost:5174**. Vite proxies `/api/*` to the backend, so the
 frontend and backend share an origin (the same as in production). You can also
 run them separately with `npm run dev:backend` and `npm run dev`.
 
@@ -66,10 +66,10 @@ run them separately with `npm run dev:backend` and `npm run dev`.
 
 ```bash
 npm run build:databricks   # outputs the SPA into backend/static
-python -m backend.main     # serves API + SPA on :8000
+python -m backend.main     # serves API + SPA on :8001
 ```
 
-Open **http://localhost:8000** — the backend serves the built frontend and the
+Open **http://localhost:8001** — the backend serves the built frontend and the
 API at the same origin. (`npm run build` outputs to `dist/` instead, for a
 standalone frontend bundle.)
 

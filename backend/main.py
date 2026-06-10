@@ -25,7 +25,7 @@ app = FastAPI(
 _cors_origins = (
     [FRONTEND_URL]
     if FRONTEND_URL
-    else ["http://localhost:5173", "http://localhost:8000"]
+    else ["http://localhost:5174", "http://localhost:8001"]
 )
 app.add_middleware(
     CORSMiddleware,

@@ -31,7 +31,9 @@ PROMPTS_SOURCE_URL = os.getenv("PROMPTS_SOURCE_URL", "")
 # Canonical allowed CORS origin. In production the frontend and backend are
 # same-origin (Databricks Apps), so no preflight fires; in dev the Vite proxy
 # forwards /api/* same-origin. Falls back to the Vite dev server origins.
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5174")
 
 # For Databricks Apps, the port is provided via the PORT environment variable.
-PORT = int(os.getenv("PORT", "8000"))
+# Local default is 8001 so this app can run alongside the Improvement Tool,
+# whose backend takes :8000.
+PORT = int(os.getenv("PORT", "8001"))

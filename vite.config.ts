@@ -12,11 +12,14 @@ export default defineConfig(({ mode }) => ({
         },
     },
     server: {
+        // Fixed port pair (frontend :5174, backend :8001) so this app can run
+        // alongside the Improvement Tool, which uses :5173/:8000.
+        port: 5174,
         // Proxy /api/* to the backend so the SPA can call it same-origin in dev,
         // matching the production layout where the backend serves the frontend.
         proxy: {
             '/api': {
-                target: 'http://localhost:8000',
+                target: 'http://localhost:8001',
                 changeOrigin: true,
             },
         },
