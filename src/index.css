@@ -1311,6 +1311,17 @@ details.columns summary:hover {
     color: white;
 }
 
+/* The "what to compare" selector stretches full width with equal-width tabs. */
+.compare-seg {
+    display: flex;
+    width: 100%;
+}
+
+.compare-seg .seg-btn {
+    flex: 1 1 0;
+    text-align: center;
+}
+
 .field-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -1374,6 +1385,14 @@ details.columns summary:hover {
     color: var(--accent);
     background: var(--card);
     cursor: pointer;
+}
+
+/* The single-pick dropdowns (compare-prompts model / compare-models prompt)
+   carry a real value, so they read as text, not an "add" affordance. */
+.solo-select {
+    color: var(--text);
+    min-width: 220px;
+    max-width: 100%;
 }
 
 .custom-add {

@@ -1,6 +1,13 @@
 import {type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState} from 'react'
 import type {EvalDefaults, EvalRunRequest, ImportedDataset} from '@/types/eval'
-import {parseDatasetIds, RUN_DEFAULTS, RUN_LS as LS, type RunGoal, type RunSource,} from '@/utils/runDefaults'
+import {
+    type CompareMode,
+    parseDatasetIds,
+    RUN_DEFAULTS,
+    RUN_LS as LS,
+    type RunGoal,
+    type RunSource,
+} from '@/utils/runDefaults'
 import {
     fetchEvalDefaults,
     getPromptSets,
@@ -10,6 +17,7 @@ import {
     promptVariantsFrom,
     runOverrides,
     setPromptSets,
+    variantPayloadByName,
 } from '@/utils/runConfig'
 import {getModelSuggestions} from '@/utils/pricing'
 import {moveItem} from '@/utils/array'
@@ -67,6 +75,27 @@ const GOALS: { key: RunGoal; icon: string; title: string; blurb: string }[] = [
     },
 ]
 
+// The three things a generation run can compare. Each holds one axis fixed and
+// varies the other, except `both`, which varies both. Picking one decides which
+// inputs the panel shows, so the user never sees more than the case needs.
+const COMPARE_MODES: { key: CompareMode; label: string; hint: string }[] = [
+    {
+        key: 'prompts',
+        label: 'Prompts',
+        hint: 'One model, several prompts — compare prompt wording on the same model.',
+    },
+    {
+        key: 'models',
+        label: 'Models',
+        hint: 'Several models, one prompt — compare models on the same prompt.',
+    },
+    {
+        key: 'both',
+        label: 'Models × Prompts',
+        hint: 'Vary both — every model with every prompt, or hand-picked pairings.',
+    },
+]
+
 // --- Drag-to-reorder --------------------------------------------------------
 // Native HTML5 drag reorder over an in-memory list. Returns per-index handlers
 // plus an `active` flag for styling the item currently being dragged. Items move
@@ -110,17 +139,22 @@ function useDragReorder<T>(list: T[], setList: (next: T[]) => void) {
     return {dragProps}
 }
 
-// One editable prompt set in the library (a named prompt the run compares).
+// One editable prompt set in the library (a named prompt the run compares). In
+// the library it carries a drag handle + an "include" checkbox; when rendered as
+// the single chosen prompt (compare-models mode) those are hidden via `single`,
+// since selection happens through the dropdown above it.
 function PromptSetCard({
                            v,
                            defaults,
                            drag,
+                           single,
                            onChange,
                            onRemove,
                        }: {
     v: PromptSet
     defaults: EvalDefaults['prompts'] | null
-    drag: DragHandlers
+    drag?: DragHandlers
+    single?: boolean
     onChange: (patch: Partial<PromptSet>) => void
     onRemove: () => void
 }) {
@@ -128,27 +162,33 @@ function PromptSetCard({
     const edited = !!(v.system || v.dataset || v.column)
     return (
         <div
-            className={`prompt-set${drag.active ? ' dragging' : ''}${v.enabled ? '' : ' off'}`}
-            onDragEnter={drag.onDragEnter}
-            onDragOver={drag.onDragOver}
-            onDragEnd={drag.onDragEnd}
+            className={`prompt-set${drag?.active ? ' dragging' : ''}${
+                v.enabled || single ? '' : ' off'
+            }`}
+            onDragEnter={drag?.onDragEnter}
+            onDragOver={drag?.onDragOver}
+            onDragEnd={drag?.onDragEnd}
         >
             <div className="ps-head">
-                <span
-                    className="drag-handle"
-                    draggable
-                    onDragStart={drag.onDragStart}
-                    title="Drag to reorder"
-                    aria-label="Reorder prompt"
-                >
-                    ⠿
-                </span>
-                <input
-                    type="checkbox"
-                    checked={v.enabled}
-                    title="Include in this run"
-                    onChange={(e) => onChange({enabled: e.target.checked})}
-                />
+                {!single && drag && (
+                    <span
+                        className="drag-handle"
+                        draggable
+                        onDragStart={drag.onDragStart}
+                        title="Drag to reorder"
+                        aria-label="Reorder prompt"
+                    >
+                        ⠿
+                    </span>
+                )}
+                {!single && (
+                    <input
+                        type="checkbox"
+                        checked={v.enabled}
+                        title="Include in this run"
+                        onChange={(e) => onChange({enabled: e.target.checked})}
+                    />
+                )}
                 <input
                     type="text"
                     className="ps-name"
@@ -224,12 +264,24 @@ export function RunPanel({
         return seen
     })
     const [customModel, setCustomModel] = useState('')
-    const [addingCustom, setAddingCustom] = useState(false)
+    // Which picker opened the "Custom…" inline input: the chips picker (vary
+    // models) or the single-model dropdown (compare prompts). null = closed.
+    const [customTarget, setCustomTarget] = useState<null | 'chips' | 'solo'>(null)
     const modelDrag = useDragReorder(models, setModels)
     const suggestions = useMemo(
         () => getModelSuggestions().filter((m) => !models.includes(m)),
         [models],
     )
+    // The single model used in "compare prompts" mode (empty → backend default).
+    const [soloModel, setSoloModel] = useState(() => localStorage.getItem(LS.soloModel) || '')
+    const soloModelOptions = useMemo(() => {
+        const seen: string[] = []
+        if (soloModel) seen.push(soloModel)
+        for (const m of [...models, ...getModelSuggestions()]) {
+            if (m && !seen.includes(m)) seen.push(m)
+        }
+        return seen
+    }, [models, soloModel])
 
     const [judgeModel, setJudgeModel] = useState(() => localStorage.getItem(LS.judge) || '')
     const [compareGold, setCompareGold] = useState(() =>
@@ -254,7 +306,26 @@ export function RunPanel({
     const promptDrag = useDragReorder(promptSets, setPromptSetsState)
     const [defaults, setDefaults] = useState<EvalDefaults['prompts'] | null>(null)
 
-    // --- Candidate combination: cross every model×prompt, or explicit pairs --
+    // --- What this generation run compares ----------------------------------
+    // Picks which inputs show. First load infers a mode from what's already
+    // stored so an existing setup keeps its shape; otherwise defaults to `both`.
+    const [compareMode, setCompareMode] = useState<CompareMode>(() => {
+        const saved = localStorage.getItem(LS.compareMode)
+        if (saved === 'prompts' || saved === 'models' || saved === 'both') return saved
+        // Pick the simplest mode that fits what's stored: only reach for `both`
+        // when both axes already vary; otherwise prefer the single-axis views.
+        const enabledPrompts = promptSets.filter((s) => s.enabled && s.name.trim()).length
+        const modelN = models.length
+        if (modelN > 1 && enabledPrompts > 1) return 'both'
+        if (modelN > 1) return 'models'
+        return 'prompts'
+    })
+    // The single prompt used in "compare models" mode ("Default" → backend prompt).
+    const [soloVariant, setSoloVariant] = useState(
+        () => localStorage.getItem(LS.soloVariant) || 'Default',
+    )
+
+    // --- Candidate combination (both mode): cross, or explicit pairs ---------
     const [pairMode, setPairMode] = useState(() => readBool(LS.pairMode, false))
     const [pairs, setPairs] = useState<PairRow[]>(readPairs)
 
@@ -281,6 +352,9 @@ export function RunPanel({
     useEffect(() => localStorage.setItem(LS.evalCols, evalCols ? '1' : '0'), [evalCols])
     useEffect(() => localStorage.setItem(LS.maxCols, maxCols), [maxCols])
     useEffect(() => setPromptSets(promptSets), [promptSets])
+    useEffect(() => localStorage.setItem(LS.compareMode, compareMode), [compareMode])
+    useEffect(() => localStorage.setItem(LS.soloModel, soloModel), [soloModel])
+    useEffect(() => localStorage.setItem(LS.soloVariant, soloVariant), [soloVariant])
     useEffect(() => localStorage.setItem(LS.pairMode, pairMode ? '1' : '0'), [pairMode])
     useEffect(() => localStorage.setItem(LS.pairs, JSON.stringify(pairs)), [pairs])
 
@@ -311,13 +385,31 @@ export function RunPanel({
     const onPickModel = (e: ChangeEvent<HTMLSelectElement>) => {
         const v = e.target.value
         e.target.value = ''
-        if (v === '__custom__') setAddingCustom(true)
+        if (v === '__custom__') setCustomTarget('chips')
         else if (v) addModel(v)
     }
+    const onPickSoloModel = (e: ChangeEvent<HTMLSelectElement>) => {
+        const v = e.target.value
+        if (v === '__custom__') setCustomTarget('solo')
+        else setSoloModel(v)
+    }
     const commitCustomModel = () => {
-        addModel(customModel)
+        const t = customModel.trim()
+        if (t) {
+            if (customTarget === 'solo') setSoloModel(t)
+            else addModel(t)
+        }
         setCustomModel('')
-        setAddingCustom(false)
+        setCustomTarget(null)
+    }
+
+    // Switch what the run compares; prefill the single model when first entering
+    // "compare prompts" so it isn't silently the backend default.
+    const pickMode = (m: CompareMode) => {
+        if (m === 'prompts' && !soloModel) {
+            setSoloModel(models[0] ?? getModelSuggestions()[0] ?? '')
+        }
+        setCompareMode(m)
     }
 
     // --- Prompt helpers -----------------------------------------------------
@@ -326,17 +418,38 @@ export function RunPanel({
     const removeSet = (id: string) =>
         setPromptSetsState(promptSets.filter((s) => s.id !== id))
     const hasDefault = promptSets.some((s) => s.name.trim().toLowerCase() === 'default')
+    const addCustomPrompt = (): PromptSet => {
+        const p: PromptSet = {id: newPromptId(), name: `Prompt ${promptSets.length + 1}`, enabled: true}
+        setPromptSetsState([...promptSets, p])
+        return p
+    }
     const onPickPrompt = (e: ChangeEvent<HTMLSelectElement>) => {
         const v = e.target.value
         e.target.value = ''
         if (v === 'default') {
             setPromptSetsState([...promptSets, {id: newPromptId(), name: 'Default', enabled: true}])
         } else if (v === 'custom') {
-            setPromptSetsState([
-                ...promptSets,
-                {id: newPromptId(), name: `Prompt ${promptSets.length + 1}`, enabled: true},
-            ])
+            addCustomPrompt()
         }
+    }
+
+    // Named (non-"Default") prompts the single-prompt dropdown can pick from.
+    const namedPrompts = useMemo(() => {
+        const seen: string[] = []
+        for (const s of promptSets) {
+            const n = s.name.trim()
+            if (n && n.toLowerCase() !== 'default' && !seen.includes(n)) seen.push(n)
+        }
+        return seen
+    }, [promptSets])
+    // The card behind the current single-prompt pick, shown so it stays editable.
+    const soloPromptCard = promptSets.find(
+        (s) => s.name.trim() === soloVariant.trim() && soloVariant.trim().toLowerCase() !== 'default',
+    )
+    const onPickSoloPrompt = (e: ChangeEvent<HTMLSelectElement>) => {
+        const v = e.target.value
+        if (v === '__new__') setSoloVariant(addCustomPrompt().name)
+        else setSoloVariant(v)
     }
 
     // --- Pairing helpers (pair mode) ----------------------------------------
@@ -370,11 +483,13 @@ export function RunPanel({
         return `${n} dataset${n === 1 ? '' : 's'}`
     })()
 
-    const modelName = models[0] || 'the default model'
-    const modelCount = Math.max(models.length, 1)
-    const variantCount = promptNames.length
-    const crossCount = modelCount * Math.max(variantCount, 1)
-    const candidateCount = pairMode ? validPairs.length : crossCount
+    const variantCount = promptNames.length // enabled, named prompts in the library
+    const goldPhrase = compareGold ? ' vs the live description' : ''
+    // Candidates generated per dataset, by what the run varies.
+    let candidateCount: number
+    if (compareMode === 'prompts') candidateCount = variantCount
+    else if (compareMode === 'models') candidateCount = models.length
+    else candidateCount = pairMode ? validPairs.length : Math.max(models.length, 1) * Math.max(variantCount, 1)
     const liveOn = evalLive
     const importedOn = source === 'import' && evalImported
 
@@ -396,6 +511,25 @@ export function RunPanel({
         } else {
             summary = `Score the ${parts.join(' and ')} metadata of ${datasetPhrase}.`
         }
+    } else if (compareMode === 'prompts') {
+        if (variantCount === 0) {
+            blockReason = 'Add and enable at least one prompt to compare.'
+        } else {
+            const m = soloModel.trim() || 'the default model'
+            const subject =
+                variantCount > 1 ? `Compare ${variantCount} prompts on ${m}` : `Generate with ${m}`
+            summary = `${subject}${goldPhrase}, across ${datasetPhrase}.`
+        }
+    } else if (compareMode === 'models') {
+        if (!models.length) {
+            blockReason = 'Add at least one model to compare.'
+        } else {
+            const subject =
+                models.length > 1 ? `Compare ${models.length} models` : `Generate with ${models[0]}`
+            const named = soloVariant.trim()
+            const usingPrompt = named && named.toLowerCase() !== 'default' ? ` with the ${named} prompt` : ''
+            summary = `${subject}${usingPrompt}${goldPhrase}, across ${datasetPhrase}.`
+        }
     } else if (pairMode) {
         if (!models.length) {
             blockReason = 'Add a model to pair.'
@@ -404,28 +538,18 @@ export function RunPanel({
         } else if (validPairs.length === 0) {
             blockReason = 'Add at least one model → prompt pairing.'
         } else {
-            const gold = compareGold ? ' vs the live description' : ''
             summary = `Run ${validPairs.length} model→prompt pairing${
                 validPairs.length === 1 ? '' : 's'
-            }${gold}, across ${datasetPhrase}.`
+            }${goldPhrase}, across ${datasetPhrase}.`
         }
+    } else if (!models.length) {
+        blockReason = 'Add at least one model.'
+    } else if (variantCount === 0) {
+        blockReason = 'Add and enable at least one prompt.'
     } else {
-        if (variantCount === 0) {
-            blockReason = 'Add and enable at least one prompt.'
-        } else {
-            let subject: string
-            if (modelCount > 1 && variantCount > 1) {
-                subject = `Compare ${modelCount} models × ${variantCount} prompts`
-            } else if (modelCount > 1) {
-                subject = `Compare ${modelCount} models`
-            } else if (variantCount > 1) {
-                subject = `Compare ${variantCount} prompts on ${modelName}`
-            } else {
-                subject = `Generate with ${modelName}`
-            }
-            const gold = compareGold ? ' vs the live description' : ''
-            summary = `${subject}${gold}, across ${datasetPhrase}.`
-        }
+        summary = `Compare ${models.length} model${models.length === 1 ? '' : 's'} × ${variantCount} prompt${
+            variantCount === 1 ? '' : 's'
+        }${goldPhrase}, across ${datasetPhrase}.`
     }
 
     const start = () => {
@@ -439,10 +563,20 @@ export function RunPanel({
         if (source === 'import') body.importedDatasets = imported
 
         if (goal === 'generate') {
-            if (pairMode) {
-                // Pair mode: explicit model→prompt candidates. Send the unique
-                // models (for meta/cost) and the full named prompt library so each
-                // pairing's variant name resolves on the backend.
+            if (compareMode === 'prompts') {
+                // One model × every enabled prompt → candidates differ by prompt.
+                if (soloModel.trim()) body.generatorModels = [soloModel.trim()] // else env default
+                const pv = promptVariantsFrom(promptSets)
+                if (pv) body.promptVariants = pv
+            } else if (compareMode === 'models') {
+                // Every model × one prompt → candidates differ by model.
+                if (models.length) body.generatorModels = models
+                const pv = variantPayloadByName(promptSets, soloVariant)
+                if (pv) body.promptVariants = pv
+            } else if (pairMode) {
+                // Both, explicit pairings: each model→prompt row is one candidate.
+                // Send the unique models (for meta/cost) and the full named prompt
+                // library so each pairing's variant name resolves on the backend.
                 body.generatorPairs = validPairs.map((p) => ({model: p.model, variant: p.variant}))
                 const uniqueModels: string[] = []
                 for (const p of validPairs) if (!uniqueModels.includes(p.model)) uniqueModels.push(p.model)
@@ -450,6 +584,7 @@ export function RunPanel({
                 const pv = promptVariantPayload(promptSets)
                 if (pv.length) body.promptVariants = pv
             } else {
+                // Both, cross: every model × every enabled prompt.
                 if (models.length) body.generatorModels = models // else omit → env default
                 const pv = promptVariantsFrom(promptSets)
                 if (pv) body.promptVariants = pv
@@ -652,231 +787,375 @@ export function RunPanel({
                     <section className="settings-section">
                         <h3>Generation</h3>
 
-                        {/* Models: pick from a dropdown, reorder draggable chips */}
+                        {/* What to compare: the three cases drive what shows below */}
                         <div className="builder-head">
-                            <span className="metrics-title">Generator models</span>
-                            <span className="section-hint"> — drag to reorder; first is primary</span>
+                            <span className="metrics-title">What do you want to compare?</span>
                         </div>
-                        <div className="picker-row">
-                            <select className="add-select" value="" onChange={onPickModel}>
-                                <option value="" disabled>
-                                    + Add model…
-                                </option>
-                                {suggestions.map((m) => (
-                                    <option key={m} value={m}>
-                                        {m}
-                                    </option>
-                                ))}
-                                <option value="__custom__">Custom…</option>
-                            </select>
-                            {addingCustom && (
-                                <span className="custom-add">
-                                    <input
-                                        type="text"
-                                        autoFocus
-                                        placeholder="model name"
-                                        value={customModel}
-                                        onChange={(e) => setCustomModel(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && commitCustomModel()}
-                                    />
-                                    <button
-                                        type="button"
-                                        className="run-btn"
-                                        disabled={!customModel.trim()}
-                                        onClick={commitCustomModel}
-                                    >
-                                        Add
-                                    </button>
-                                </span>
-                            )}
-                        </div>
-                        {models.length > 0 ? (
-                            <div className="chip-row">
-                                {models.map((m, i) => {
-                                    const d = modelDrag.dragProps(i)
-                                    return (
-                                        <span
-                                            key={m}
-                                            className={`chip${d.active ? ' dragging' : ''}`}
-                                            draggable
-                                            onDragStart={d.onDragStart}
-                                            onDragEnter={d.onDragEnter}
-                                            onDragOver={d.onDragOver}
-                                            onDragEnd={d.onDragEnd}
-                                        >
-                                            <span className="drag-handle" aria-hidden>
-                                                ⠿
-                                            </span>
-                                            <span className="chip-label">{m}</span>
-                                            <button
-                                                type="button"
-                                                className="chip-x"
-                                                aria-label={`Remove ${m}`}
-                                                onClick={() => removeModel(m)}
-                                            >
-                                                ✕
-                                            </button>
-                                        </span>
-                                    )
-                                })}
-                            </div>
-                        ) : (
-                            <p className="section-hint">
-                                No models selected — the backend env default model is used.
-                            </p>
-                        )}
-
-                        {/* Prompts: add from dropdown, reorder/edit draggable cards */}
-                        <div className="builder-head" style={{marginTop: 16}}>
-                            <span className="metrics-title">Prompts</span>
-                            <span className="section-hint"> — add 2+ to compare prompt variants</span>
-                        </div>
-                        <div className="picker-row">
-                            <select className="add-select" value="" onChange={onPickPrompt}>
-                                <option value="" disabled>
-                                    + Add prompt…
-                                </option>
-                                <option value="default" disabled={hasDefault}>
-                                    Default (backend prompt)
-                                </option>
-                                <option value="custom">Custom prompt…</option>
-                            </select>
-                        </div>
-                        <div className="prompt-list">
-                            {promptSets.length === 0 && (
-                                <p className="section-hint">
-                                    Add a prompt to generate with. “Default” uses the backend’s built-in
-                                    prompt.
-                                </p>
-                            )}
-                            {promptSets.map((v, i) => (
-                                <PromptSetCard
-                                    key={v.id}
-                                    v={v}
-                                    defaults={defaults}
-                                    drag={promptDrag.dragProps(i)}
-                                    onChange={(patch) => updateSet(v.id, patch)}
-                                    onRemove={() => removeSet(v.id)}
-                                />
-                            ))}
-                        </div>
-
-                        {/* Combine: cross every model×prompt, or pair manually */}
-                        <div className="builder-head" style={{marginTop: 16}}>
-                            <span className="metrics-title">Combine</span>
-                        </div>
-                        <div className="seg">
-                            {(
-                                [
-                                    [false, 'Cross all'],
-                                    [true, 'Pair manually'],
-                                ] as [boolean, string][]
-                            ).map(([val, label]) => (
+                        <div className="seg compare-seg">
+                            {COMPARE_MODES.map((m) => (
                                 <button
-                                    key={label}
+                                    key={m.key}
                                     type="button"
-                                    className={`seg-btn${pairMode === val ? ' active' : ''}`}
-                                    onClick={() => setPairMode(val)}
+                                    className={`seg-btn${compareMode === m.key ? ' active' : ''}`}
+                                    onClick={() => pickMode(m.key)}
                                 >
-                                    {label}
+                                    {m.label}
                                 </button>
                             ))}
                         </div>
+                        <p className="section-hint">
+                            {COMPARE_MODES.find((m) => m.key === compareMode)?.hint}
+                        </p>
 
-                        {pairMode ? (
-                            <div className="pair-build">
-                                <p className="section-hint">
-                                    Each row is one candidate — pick a model and the prompt it runs
-                                    with. The same model can appear with different prompts.
-                                </p>
-                                {pairs.length > 0 && (
-                                    <div className="pair-list">
-                                        {pairs.map((p) => {
-                                            const modelOpts =
-                                                models.includes(p.model) || !p.model
-                                                    ? models
-                                                    : [p.model, ...models]
-                                            const promptOpts =
-                                                promptNames.includes(p.variant) || !p.variant
-                                                    ? promptNames
-                                                    : [p.variant, ...promptNames]
-                                            const stale =
-                                                !models.includes(p.model) ||
-                                                !promptNames.includes(p.variant)
+                        {/* Model axis — single dropdown when fixed, chips when varied */}
+                        {compareMode === 'prompts' ? (
+                            <>
+                                <div className="builder-head" style={{marginTop: 16}}>
+                                    <span className="metrics-title">Model</span>
+                                    <span className="section-hint"> — every prompt runs on this model</span>
+                                </div>
+                                <div className="picker-row">
+                                    <select
+                                        className="add-select solo-select"
+                                        value={soloModel}
+                                        onChange={onPickSoloModel}
+                                    >
+                                        <option value="">(backend default model)</option>
+                                        {soloModelOptions.map((m) => (
+                                            <option key={m} value={m}>
+                                                {m}
+                                            </option>
+                                        ))}
+                                        <option value="__custom__">Custom…</option>
+                                    </select>
+                                    {customTarget === 'solo' && (
+                                        <span className="custom-add">
+                                            <input
+                                                type="text"
+                                                autoFocus
+                                                placeholder="model name"
+                                                value={customModel}
+                                                onChange={(e) => setCustomModel(e.target.value)}
+                                                onKeyDown={(e) =>
+                                                    e.key === 'Enter' && commitCustomModel()
+                                                }
+                                            />
+                                            <button
+                                                type="button"
+                                                className="run-btn"
+                                                disabled={!customModel.trim()}
+                                                onClick={commitCustomModel}
+                                            >
+                                                Add
+                                            </button>
+                                        </span>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="builder-head" style={{marginTop: 16}}>
+                                    <span className="metrics-title">Models</span>
+                                    <span className="section-hint"> — drag to reorder; first is primary</span>
+                                </div>
+                                <div className="picker-row">
+                                    <select className="add-select" value="" onChange={onPickModel}>
+                                        <option value="" disabled>
+                                            + Add model…
+                                        </option>
+                                        {suggestions.map((m) => (
+                                            <option key={m} value={m}>
+                                                {m}
+                                            </option>
+                                        ))}
+                                        <option value="__custom__">Custom…</option>
+                                    </select>
+                                    {customTarget === 'chips' && (
+                                        <span className="custom-add">
+                                            <input
+                                                type="text"
+                                                autoFocus
+                                                placeholder="model name"
+                                                value={customModel}
+                                                onChange={(e) => setCustomModel(e.target.value)}
+                                                onKeyDown={(e) =>
+                                                    e.key === 'Enter' && commitCustomModel()
+                                                }
+                                            />
+                                            <button
+                                                type="button"
+                                                className="run-btn"
+                                                disabled={!customModel.trim()}
+                                                onClick={commitCustomModel}
+                                            >
+                                                Add
+                                            </button>
+                                        </span>
+                                    )}
+                                </div>
+                                {models.length > 0 ? (
+                                    <div className="chip-row">
+                                        {models.map((m, i) => {
+                                            const d = modelDrag.dragProps(i)
                                             return (
-                                                <div
-                                                    className={`pair-row${stale ? ' stale' : ''}`}
-                                                    key={p.id}
+                                                <span
+                                                    key={m}
+                                                    className={`chip${d.active ? ' dragging' : ''}`}
+                                                    draggable
+                                                    onDragStart={d.onDragStart}
+                                                    onDragEnter={d.onDragEnter}
+                                                    onDragOver={d.onDragOver}
+                                                    onDragEnd={d.onDragEnd}
                                                 >
-                                                    <select
-                                                        value={p.model}
-                                                        onChange={(e) =>
-                                                            updatePair(p.id, {model: e.target.value})
-                                                        }
-                                                    >
-                                                        <option value="" disabled>
-                                                            model…
-                                                        </option>
-                                                        {modelOpts.map((m) => (
-                                                            <option key={m} value={m}>
-                                                                {m}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <span className="pair-sep">·</span>
-                                                    <select
-                                                        value={p.variant}
-                                                        onChange={(e) =>
-                                                            updatePair(p.id, {variant: e.target.value})
-                                                        }
-                                                    >
-                                                        <option value="" disabled>
-                                                            prompt…
-                                                        </option>
-                                                        {promptOpts.map((n) => (
-                                                            <option key={n} value={n}>
-                                                                {n}
-                                                            </option>
-                                                        ))}
-                                                    </select>
+                                                    <span className="drag-handle" aria-hidden>
+                                                        ⠿
+                                                    </span>
+                                                    <span className="chip-label">{m}</span>
                                                     <button
                                                         type="button"
-                                                        className="reset-btn"
-                                                        aria-label="Remove pairing"
-                                                        onClick={() => removePair(p.id)}
+                                                        className="chip-x"
+                                                        aria-label={`Remove ${m}`}
+                                                        onClick={() => removeModel(m)}
                                                     >
                                                         ✕
                                                     </button>
-                                                </div>
+                                                </span>
                                             )
                                         })}
                                     </div>
-                                )}
-                                <button
-                                    type="button"
-                                    className="run-btn add-metric"
-                                    disabled={!models.length || variantCount === 0}
-                                    onClick={addPair}
-                                >
-                                    + Add pairing
-                                </button>
-                                {(!models.length || variantCount === 0) && (
+                                ) : (
                                     <p className="section-hint">
-                                        Add at least one model and one prompt above to pair them.
+                                        No models selected — the backend env default model is used.
                                     </p>
                                 )}
-                                <p className="combo-count">
-                                    <b>
-                                        {candidateCount} candidate{candidateCount === 1 ? '' : 's'}
-                                    </b>{' '}
-                                    per dataset
-                                </p>
-                            </div>
+                            </>
+                        )}
+
+                        {/* Prompt axis — single dropdown when fixed, library when varied */}
+                        {compareMode === 'models' ? (
+                            <>
+                                <div className="builder-head" style={{marginTop: 16}}>
+                                    <span className="metrics-title">Prompt</span>
+                                    <span className="section-hint"> — every model uses this prompt</span>
+                                </div>
+                                <div className="picker-row">
+                                    <select
+                                        className="add-select solo-select"
+                                        value={soloVariant}
+                                        onChange={onPickSoloPrompt}
+                                    >
+                                        <option value="Default">Default (backend prompt)</option>
+                                        {namedPrompts.map((n) => (
+                                            <option key={n} value={n}>
+                                                {n}
+                                            </option>
+                                        ))}
+                                        <option value="__new__">New prompt…</option>
+                                    </select>
+                                </div>
+                                {soloPromptCard && (
+                                    <div className="prompt-list">
+                                        <PromptSetCard
+                                            v={soloPromptCard}
+                                            defaults={defaults}
+                                            single
+                                            onChange={(patch) => updateSet(soloPromptCard.id, patch)}
+                                            onRemove={() => {
+                                                removeSet(soloPromptCard.id)
+                                                setSoloVariant('Default')
+                                            }}
+                                        />
+                                    </div>
+                                )}
+                            </>
                         ) : (
+                            <>
+                                <div className="builder-head" style={{marginTop: 16}}>
+                                    <span className="metrics-title">Prompts</span>
+                                    <span className="section-hint">
+                                        {compareMode === 'prompts'
+                                            ? ' — add 2+ to compare wording'
+                                            : ' — each enabled prompt pairs with every model'}
+                                    </span>
+                                </div>
+                                <div className="picker-row">
+                                    <select className="add-select" value="" onChange={onPickPrompt}>
+                                        <option value="" disabled>
+                                            + Add prompt…
+                                        </option>
+                                        <option value="default" disabled={hasDefault}>
+                                            Default (backend prompt)
+                                        </option>
+                                        <option value="custom">Custom prompt…</option>
+                                    </select>
+                                </div>
+                                <div className="prompt-list">
+                                    {promptSets.length === 0 && (
+                                        <p className="section-hint">
+                                            Add a prompt to generate with. “Default” uses the backend’s
+                                            built-in prompt.
+                                        </p>
+                                    )}
+                                    {promptSets.map((v, i) => (
+                                        <PromptSetCard
+                                            key={v.id}
+                                            v={v}
+                                            defaults={defaults}
+                                            drag={promptDrag.dragProps(i)}
+                                            onChange={(patch) => updateSet(v.id, patch)}
+                                            onRemove={() => removeSet(v.id)}
+                                        />
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        {/* Combine: cross every model×prompt, or hand-pick pairings */}
+                        {compareMode === 'both' && (
+                            <>
+                                <div className="builder-head" style={{marginTop: 16}}>
+                                    <span className="metrics-title">Combine</span>
+                                </div>
+                                <div className="seg">
+                                    {(
+                                        [
+                                            [false, 'Cross all'],
+                                            [true, 'Pair manually'],
+                                        ] as [boolean, string][]
+                                    ).map(([val, label]) => (
+                                        <button
+                                            key={label}
+                                            type="button"
+                                            className={`seg-btn${pairMode === val ? ' active' : ''}`}
+                                            onClick={() => setPairMode(val)}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {pairMode ? (
+                                    <div className="pair-build">
+                                        <p className="section-hint">
+                                            Each row is one candidate — pick a model and the prompt it
+                                            runs with. The same model can appear with different prompts.
+                                        </p>
+                                        {pairs.length > 0 && (
+                                            <div className="pair-list">
+                                                {pairs.map((p) => {
+                                                    const modelOpts =
+                                                        models.includes(p.model) || !p.model
+                                                            ? models
+                                                            : [p.model, ...models]
+                                                    const promptOpts =
+                                                        promptNames.includes(p.variant) || !p.variant
+                                                            ? promptNames
+                                                            : [p.variant, ...promptNames]
+                                                    const stale =
+                                                        !models.includes(p.model) ||
+                                                        !promptNames.includes(p.variant)
+                                                    return (
+                                                        <div
+                                                            className={`pair-row${stale ? ' stale' : ''}`}
+                                                            key={p.id}
+                                                        >
+                                                            <select
+                                                                value={p.model}
+                                                                onChange={(e) =>
+                                                                    updatePair(p.id, {
+                                                                        model: e.target.value,
+                                                                    })
+                                                                }
+                                                            >
+                                                                <option value="" disabled>
+                                                                    model…
+                                                                </option>
+                                                                {modelOpts.map((m) => (
+                                                                    <option key={m} value={m}>
+                                                                        {m}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <span className="pair-sep">·</span>
+                                                            <select
+                                                                value={p.variant}
+                                                                onChange={(e) =>
+                                                                    updatePair(p.id, {
+                                                                        variant: e.target.value,
+                                                                    })
+                                                                }
+                                                            >
+                                                                <option value="" disabled>
+                                                                    prompt…
+                                                                </option>
+                                                                {promptOpts.map((n) => (
+                                                                    <option key={n} value={n}>
+                                                                        {n}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <button
+                                                                type="button"
+                                                                className="reset-btn"
+                                                                aria-label="Remove pairing"
+                                                                onClick={() => removePair(p.id)}
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        )}
+                                        <button
+                                            type="button"
+                                            className="run-btn add-metric"
+                                            disabled={!models.length || variantCount === 0}
+                                            onClick={addPair}
+                                        >
+                                            + Add pairing
+                                        </button>
+                                        {(!models.length || variantCount === 0) && (
+                                            <p className="section-hint">
+                                                Add at least one model and one prompt above to pair them.
+                                            </p>
+                                        )}
+                                        <p className="combo-count">
+                                            <b>
+                                                {candidateCount} candidate
+                                                {candidateCount === 1 ? '' : 's'}
+                                            </b>{' '}
+                                            per dataset
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="combo-count">
+                                        {Math.max(models.length, 1)} model
+                                        {Math.max(models.length, 1) === 1 ? '' : 's'} ×{' '}
+                                        {Math.max(variantCount, 1)} prompt
+                                        {Math.max(variantCount, 1) === 1 ? '' : 's'} ={' '}
+                                        <b>
+                                            {candidateCount} candidate
+                                            {candidateCount === 1 ? '' : 's'}
+                                        </b>{' '}
+                                        per dataset
+                                    </p>
+                                )}
+                            </>
+                        )}
+
+                        {compareMode === 'prompts' && (
                             <p className="combo-count">
-                                {modelCount} model{modelCount === 1 ? '' : 's'} ×{' '}
-                                {Math.max(variantCount, 1)} prompt
-                                {Math.max(variantCount, 1) === 1 ? '' : 's'} ={' '}
+                                1 model × {variantCount} prompt{variantCount === 1 ? '' : 's'} ={' '}
+                                <b>
+                                    {candidateCount} candidate{candidateCount === 1 ? '' : 's'}
+                                </b>{' '}
+                                per dataset
+                            </p>
+                        )}
+                        {compareMode === 'models' && (
+                            <p className="combo-count">
+                                {models.length} model{models.length === 1 ? '' : 's'} × 1 prompt ={' '}
                                 <b>
                                     {candidateCount} candidate{candidateCount === 1 ? '' : 's'}
                                 </b>{' '}

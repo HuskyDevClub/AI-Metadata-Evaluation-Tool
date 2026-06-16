@@ -168,6 +168,23 @@ export function buildPromptVariants(): PromptVariant[] | undefined {
     return promptVariantsFrom(getPromptSets())
 }
 
+// The single-prompt payload for "compare models" mode, where one prompt is held
+// fixed across every model. Returns the one named prompt the user picked, or
+// undefined for the backend default (a blank/"Default" pick, or a pristine
+// "Default" card) so the run uses its built-in prompt and tags no variant.
+export function variantPayloadByName(
+    sets: PromptSet[],
+    name: string,
+): PromptVariant[] | undefined {
+    const target = name.trim()
+    if (!target || target.toLowerCase() === 'default') {
+        const def = sets.find((s) => s.name.trim().toLowerCase() === 'default')
+        return def ? promptVariantsFrom([def]) : undefined
+    }
+    const chosen = sets.find((s) => s.name.trim() === target)
+    return chosen ? promptVariantsFrom([chosen]) : undefined
+}
+
 // --- Fetch defaults ---------------------------------------------------------
 export async function fetchEvalDefaults(): Promise<EvalDefaults> {
     const resp = await fetch(`${getApiBaseUrl()}/api/eval/defaults`, {

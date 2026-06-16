@@ -24,6 +24,12 @@ export const RUN_LS = {
     // Generation builder: cross every model×prompt vs explicit model→prompt pairs.
     pairMode: 'evalViewer.runPairMode',
     pairs: 'evalViewer.runGeneratorPairs',
+    // What the generation run compares, plus the single picks for the two modes
+    // that hold one axis fixed (compare prompts → one model; compare models →
+    // one prompt).
+    compareMode: 'evalViewer.runCompareMode',
+    soloModel: 'evalViewer.runSoloModel',
+    soloVariant: 'evalViewer.runSoloVariant',
     // Which goal the Run panel starts on.
     goal: 'evalViewer.runGoal',
 }
@@ -32,6 +38,10 @@ export type RunSource = 'csv' | 'ids' | 'import'
 // The two top-level intents: score metadata that already exists, or generate
 // new metadata and score it.
 export type RunGoal = 'validate' | 'generate'
+// What an "evaluate AI generation" run varies. `prompts`: one model, many
+// prompts. `models`: many models, one prompt. `both`: every model × every prompt
+// (or explicit pairings).
+export type CompareMode = 'prompts' | 'models' | 'both'
 
 export const RUN_DEFAULTS = {
     limit: 5,
