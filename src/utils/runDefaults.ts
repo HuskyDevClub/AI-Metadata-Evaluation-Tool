@@ -15,9 +15,15 @@ export const RUN_LS = {
     evalLive: 'evalViewer.runEvaluateLive',
     evalImported: 'evalViewer.runEvaluateImported',
     compareGold: 'evalViewer.runCompareGold',
-    // Prompt variants (compare prompts) + whether the implicit Default is on.
+    // Unified ordered prompt library (each entry compares as one prompt), built
+    // in the Run panel. Supersedes the legacy `variants` + `defaultVariant` keys,
+    // which are still read once to migrate older browsers.
+    promptSets: 'evalViewer.promptSets',
     variants: 'evalViewer.promptVariants',
     defaultVariant: 'evalViewer.runDefaultVariantOn',
+    // Generation builder: cross every model×prompt vs explicit model→prompt pairs.
+    pairMode: 'evalViewer.runPairMode',
+    pairs: 'evalViewer.runGeneratorPairs',
     // Which goal the Run panel starts on.
     goal: 'evalViewer.runGoal',
 }

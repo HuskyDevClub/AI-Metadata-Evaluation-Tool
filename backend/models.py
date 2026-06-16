@@ -50,6 +50,16 @@ class PromptVariant(BaseModel):
     column: str | None = Field(default=None, max_length=50000)
 
 
+class GeneratorPair(BaseModel):
+    """An explicit model↔prompt pairing — one generated candidate. `variant`
+    references a `PromptVariant` by its `name` (blank or unknown → the run's
+    Default variant). When a run supplies pairs, generated candidates are exactly
+    these pairs instead of crossing every model with every prompt."""
+
+    model: str = Field(min_length=1, max_length=200)
+    variant: str | None = Field(default=None, max_length=80)
+
+
 class ImportedDataset(BaseModel):
     """A dataset supplied by the client (e.g. parsed from an AI-Metadata-
     Improvement-Tool export). The dataset is still loaded live from Socrata by
@@ -101,6 +111,10 @@ class EvalRunRequest(BaseModel):
     generatorModels: list[str] | None = Field(default=None, max_length=20)
     # Named prompt sets to compare. Omitted → a single "Default" variant.
     promptVariants: list[PromptVariant] | None = Field(default=None, max_length=10)
+    # Explicit model↔prompt pairings. When non-empty, generated candidates are
+    # exactly these pairs (each `variant` names one of `promptVariants`) instead
+    # of the default cross of every generatorModels × promptVariants.
+    generatorPairs: list[GeneratorPair] | None = Field(default=None, max_length=40)
     judgeModel: str | None = Field(default=None, max_length=200)
 
     # --- Judge reliability controls -------------------------------------------

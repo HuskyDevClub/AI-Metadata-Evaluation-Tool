@@ -35,6 +35,17 @@ export const MODEL_PRICING: Record<string, ModelRate> = {
     llama: {input: 0, output: 0, note: 'local'},
 }
 
+// Suggested model names for the Run-panel dropdown: the built-in priced models
+// plus any custom-priced keys the user added in Settings. These are convenience
+// suggestions only — the picker always allows a free-typed custom model too.
+export function getModelSuggestions(): string[] {
+    const seen: string[] = []
+    for (const k of [...Object.keys(MODEL_PRICING), ...Object.keys(getCustomPricing())]) {
+        if (!seen.includes(k)) seen.push(k)
+    }
+    return seen
+}
+
 export function lookupModelRate(modelName?: string): (ModelRate & { key: string }) | null {
     if (!modelName) return null
     const lower = String(modelName).toLowerCase()

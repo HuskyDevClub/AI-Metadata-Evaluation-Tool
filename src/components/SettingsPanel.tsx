@@ -1,5 +1,5 @@
-import {type ChangeEvent, useCallback, useEffect, useState} from 'react'
-import type {EvalDefaults, PromptOverrides, ScoringCategory} from '@/types/eval'
+import {type ChangeEvent, useEffect, useState} from 'react'
+import type {EvalDefaults, ScoringCategory} from '@/types/eval'
 import {API_BASE_URL_KEY, ENV_API_BASE_URL} from '@/utils/config'
 import {
     clearAllSettings,
@@ -12,14 +12,7 @@ import {
 import {downloadJsonAs, readJsonFile} from '@/utils/fileIo'
 import {MODEL_PRICING} from '@/utils/pricing'
 import {RUN_DEFAULTS, RUN_LS} from '@/utils/runDefaults'
-import {
-    fetchEvalDefaults,
-    getPromptOverrides,
-    getScoring,
-    type ScoringLevel,
-    setPromptOverrides,
-    setScoring,
-} from '@/utils/runConfig'
+import {fetchEvalDefaults, getScoring, type ScoringLevel, setScoring,} from '@/utils/runConfig'
 
 const METRIC_KEY_RE = /^[A-Za-z][A-Za-z0-9_]*$/
 
@@ -32,123 +25,6 @@ function metricKeyFromLabel(label: string): string {
         .replace(/^_+|_+$/g, '')
     if (!slug) return ''
     return /^[a-z]/.test(slug) ? slug : `m_${slug}`
-}
-
-type PromptKey = 'system' | 'dataset' | 'column'
-const PROMPT_FIELDS: { key: PromptKey; label: string; hint: string }[] = [
-    {
-        key: 'system',
-        label: 'System prompt',
-        hint: 'Sent as the system message for every generation. No placeholders.',
-    },
-    {
-        key: 'dataset',
-        label: 'Dataset prompt',
-        hint: 'Keep placeholders: {fileName} {rowCount} {columnInfo} {sampleCount} {sampleRows}.',
-    },
-    {
-        key: 'column',
-        label: 'Column prompt',
-        hint: 'Keep placeholders: {columnName} {dataType} {nonNullCount} {rowCount} {completenessPercent} {nullCount} {columnStats} {sampleValues} {datasetDescription}.',
-    },
-]
-
-// --- Generation prompts -----------------------------------------------------
-function PromptsSection({
-                            defaults,
-                            loading,
-                            error,
-                            onRetry,
-                        }: {
-    defaults: EvalDefaults['prompts'] | null
-    loading: boolean
-    error: string
-    onRetry: () => void
-}) {
-    // Editors hold the full prompt text: a saved override if present, else the
-    // loaded default. The parent remounts this section when defaults arrive, so
-    // this initializer re-runs and picks them up. An override is persisted only
-    // when the text differs from the default.
-    const [text, setText] = useState<Record<PromptKey, string>>(() => {
-        const ov = getPromptOverrides()
-        return {
-            system: ov.system ?? defaults?.system ?? '',
-            dataset: ov.dataset ?? defaults?.dataset ?? '',
-            column: ov.column ?? defaults?.column ?? '',
-        }
-    })
-
-    const persist = (next: Record<PromptKey, string>) => {
-        const ov: PromptOverrides = {}
-        for (const {key} of PROMPT_FIELDS) {
-            const isEdited = defaults ? next[key] !== defaults[key] : next[key] !== ''
-            if (isEdited) ov[key] = next[key]
-        }
-        setPromptOverrides(ov)
-    }
-    const onChange = (key: PromptKey, value: string) => {
-        const next = {...text, [key]: value}
-        setText(next)
-        persist(next)
-    }
-    const reset = (key: PromptKey) => {
-        const next = {...text, [key]: defaults?.[key] ?? ''}
-        setText(next)
-        persist(next)
-    }
-
-    return (
-        <section className="settings-section">
-            <h3>Generation prompts</h3>
-            <p className="section-hint">
-                Override the templates used to generate descriptions for this browser. Blank fields
-                use the backend defaults
-                {defaults?.source ? (
-                    <>
-                        {' '}
-                        (source: <code>{defaults.source}</code>)
-                    </>
-                ) : null}
-                .
-            </p>
-            {loading && <p className="section-hint">Loading defaults…</p>}
-            {error && (
-                <p className="settings-error">
-                    Couldn’t load defaults: {error}{' '}
-                    <button type="button" className="reset-btn" onClick={onRetry}>
-                        retry
-                    </button>
-                </p>
-            )}
-            {PROMPT_FIELDS.map(({key, label, hint}) => {
-                const edited = defaults ? text[key] !== defaults[key] : !!text[key]
-                return (
-                    <details className="prompt-field" key={key}>
-                        <summary>
-                            {label}
-                            {edited && <span className="edited-badge">edited</span>}
-                        </summary>
-                        <p className="section-hint">{hint}</p>
-                        <textarea
-                            rows={8}
-                            value={text[key]}
-                            onChange={(e) => onChange(key, e.target.value)}
-                        />
-                        <div className="field-actions">
-                            <button
-                                type="button"
-                                className="reset-btn"
-                                disabled={!edited}
-                                onClick={() => reset(key)}
-                            >
-                                Reset to default
-                            </button>
-                        </div>
-                    </details>
-                )
-            })}
-        </section>
-    )
 }
 
 // --- Judge metrics ----------------------------------------------------------
@@ -283,7 +159,6 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
     }, [apiUrl])
 
     // --- Run defaults (shared with the Run panel) ---------------------------
-    const [genModels, setGenModels] = useState(() => localStorage.getItem(RUN_LS.gen) || '')
     const [judgeModel, setJudgeModel] = useState(() => localStorage.getItem(RUN_LS.judge) || '')
     const [limit, setLimit] = useState(
         () => localStorage.getItem(RUN_LS.limit) || String(RUN_DEFAULTS.limit),
@@ -295,34 +170,20 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
     const [maxCols, setMaxCols] = useState(
         () => localStorage.getItem(RUN_LS.maxCols) || String(RUN_DEFAULTS.maxCols),
     )
-    useEffect(() => localStorage.setItem(RUN_LS.gen, genModels), [genModels])
     useEffect(() => localStorage.setItem(RUN_LS.judge, judgeModel), [judgeModel])
     useEffect(() => localStorage.setItem(RUN_LS.limit, limit), [limit])
     useEffect(() => localStorage.setItem(RUN_LS.evalCols, evalCols ? '1' : '0'), [evalCols])
     useEffect(() => localStorage.setItem(RUN_LS.maxCols, maxCols), [maxCols])
 
-    // --- Defaults from the backend (prompts + judge metrics) ----------------
+    // --- Defaults from the backend (judge metrics) --------------------------
     const [defaults, setDefaults] = useState<EvalDefaults | null>(null)
-    const [defaultsErr, setDefaultsErr] = useState('')
-    const [loadingDefaults, setLoadingDefaults] = useState(true)
-    const loadDefaults = useCallback(() => {
-        setLoadingDefaults(true)
-        setDefaultsErr('')
-        fetchEvalDefaults()
-            .then(setDefaults)
-            .catch((e: Error) => setDefaultsErr(e.message))
-            .finally(() => setLoadingDefaults(false))
-    }, [])
     // Fetch once on open. setState runs only in the async continuations (after
     // await), never synchronously in the effect body, so renders don't cascade.
     useEffect(() => {
         let cancelled = false
         fetchEvalDefaults()
             .then((d) => !cancelled && setDefaults(d))
-            .catch((e: Error) => !cancelled && setDefaultsErr(e.message))
-            .finally(() => {
-                if (!cancelled) setLoadingDefaults(false)
-            })
+            .catch(() => undefined)
         return () => {
             cancelled = true
         }
@@ -363,7 +224,6 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
 
     const syncFromStorage = () => {
         setApiUrl(localStorage.getItem(API_BASE_URL_KEY) ?? '')
-        setGenModels(localStorage.getItem(RUN_LS.gen) || '')
         setJudgeModel(localStorage.getItem(RUN_LS.judge) || '')
         setLimit(localStorage.getItem(RUN_LS.limit) || String(RUN_DEFAULTS.limit))
         const s = localStorage.getItem(RUN_LS.evalCols)
@@ -461,18 +321,10 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
                 <section className="settings-section">
                     <h3>Run defaults</h3>
                     <p className="section-hint">
-                        Defaults the <b>Run new eval…</b> panel starts from. Blank model fields fall
-                        back to the backend env defaults.
+                        Defaults the <b>Run new eval…</b> panel starts from. Generator models and
+                        prompts now live in that panel. A blank judge model uses the backend env
+                        default.
                     </p>
-                    <label className="settings-field">
-                        Generator models (one per line)
-                        <textarea
-                            rows={3}
-                            placeholder="(env default)"
-                            value={genModels}
-                            onChange={(e) => setGenModels(e.target.value)}
-                        />
-                    </label>
                     <label className="settings-field">
                         Judge model
                         <input
@@ -512,14 +364,6 @@ export function SettingsPanel({onClose}: { onClose: () => void }) {
                         />
                     </label>
                 </section>
-
-                <PromptsSection
-                    key={`prompts-${resetNonce}-${defaults ? 'd' : 'n'}`}
-                    defaults={defaults?.prompts ?? null}
-                    loading={loadingDefaults}
-                    error={defaultsErr}
-                    onRetry={loadDefaults}
-                />
 
                 <section className="settings-section">
                     <h3>Judge metrics</h3>

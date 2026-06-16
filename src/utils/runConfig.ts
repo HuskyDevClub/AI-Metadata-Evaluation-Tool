@@ -1,15 +1,14 @@
-// Per-run prompt + judge-metric overrides edited in the Settings drawer. Stored
-// in localStorage (under the evalViewer.* prefix so a reset clears them) and
-// merged into the run request when an eval is launched from the Run panel.
+// Per-run prompt library + judge-metric overrides edited in the Run panel and
+// Settings drawer. Stored in localStorage (under the evalViewer.* prefix so a
+// reset clears them) and merged into the run request when an eval is launched.
 
-import type {EvalDefaults, EvalRunRequest, PromptOverrides, PromptVariant, ScoringCategory,} from '@/types/eval'
+import type {EvalDefaults, EvalRunRequest, PromptVariant, ScoringCategory} from '@/types/eval'
 import {getApiBaseUrl} from '@/utils/config'
 import {RUN_DEFAULTS, RUN_LS} from '@/utils/runDefaults'
 
 export type ScoringLevel = 'dataset' | 'column'
 
 const LS = {
-    prompts: 'evalViewer.promptOverrides',
     scoringDataset: 'evalViewer.scoringDataset',
     scoringColumn: 'evalViewer.scoringColumn',
 }
@@ -24,22 +23,6 @@ function readJson<T>(key: string): T | null {
     } catch {
         return null
     }
-}
-
-// --- Prompt overrides -------------------------------------------------------
-export function getPromptOverrides(): PromptOverrides {
-    return readJson<PromptOverrides>(LS.prompts) ?? {}
-}
-
-export function setPromptOverrides(overrides: PromptOverrides): void {
-    // Drop blank fields so an empty edit means "use the default".
-    const cleaned: PromptOverrides = {}
-    for (const k of ['system', 'dataset', 'column'] as const) {
-        const v = (overrides[k] ?? '').trim()
-        if (v) cleaned[k] = overrides[k]
-    }
-    if (Object.keys(cleaned).length) localStorage.setItem(LS.prompts, JSON.stringify(cleaned))
-    else localStorage.removeItem(LS.prompts)
 }
 
 // --- Judge metrics ----------------------------------------------------------
@@ -84,11 +67,13 @@ export function validScoring(cats: ScoringCategory[]): ScoringCategory[] {
         .filter((c) => KEY_RE.test(c.key) && c.label.length > 0)
 }
 
-// --- Prompt variants (compare prompts) --------------------------------------
-// A named prompt set the run can compare. `enabled` selects it for the run; any
-// blank override falls back to the resolved default template. The implicit
-// "Default" variant (the Settings prompts) is tracked by its own on/off flag.
-export interface StoredVariant {
+// --- Prompt library (compare prompts) ---------------------------------------
+// An ordered list of named prompt sets the run compares side by side. Each entry
+// is one candidate prompt; `enabled` includes it in the run. Any blank override
+// falls back to the backend's resolved default template, so a pristine "Default"
+// set (no overrides) means "use the backend default prompt".
+export interface PromptSet {
+    id: string
     name: string
     enabled: boolean
     system?: string
@@ -96,39 +81,59 @@ export interface StoredVariant {
     column?: string
 }
 
-export function getVariants(): StoredVariant[] {
-    const arr = readJson<StoredVariant[]>(RUN_LS.variants)
-    if (!Array.isArray(arr)) return []
-    return arr.map((v) => ({
+let idSeq = 0
+
+// Unique enough for React keys / drag identity within a session.
+export function newPromptId(): string {
+    idSeq += 1
+    return `ps_${Date.now().toString(36)}_${idSeq}`
+}
+
+function normalizeSet(v: Partial<PromptSet>): PromptSet {
+    return {
+        id: typeof v.id === 'string' && v.id ? v.id : newPromptId(),
         name: typeof v.name === 'string' ? v.name : '',
         enabled: v.enabled !== false,
         system: v.system,
         dataset: v.dataset,
         column: v.column,
-    }))
+    }
 }
 
-export function setVariants(list: StoredVariant[]): void {
-    if (list.length) localStorage.setItem(RUN_LS.variants, JSON.stringify(list))
-    else localStorage.removeItem(RUN_LS.variants)
+// One-time migration: fold the legacy standalone "Default" toggle plus the old
+// `variants` list into the unified, reorderable prompt library.
+function migratePromptSets(): PromptSet[] {
+    const defRaw = localStorage.getItem(RUN_LS.defaultVariant)
+    const defaultOn = defRaw === null ? RUN_DEFAULTS.defaultVariant : defRaw === '1'
+    const list: PromptSet[] = [normalizeSet({name: 'Default', enabled: defaultOn})]
+    const legacy = readJson<Partial<PromptSet>[]>(RUN_LS.variants)
+    if (Array.isArray(legacy)) {
+        for (const v of legacy) list.push(normalizeSet(v))
+    }
+    return list
 }
 
-export function getDefaultVariantOn(): boolean {
-    const raw = localStorage.getItem(RUN_LS.defaultVariant)
-    return raw === null ? RUN_DEFAULTS.defaultVariant : raw === '1'
+export function getPromptSets(): PromptSet[] {
+    const raw = localStorage.getItem(RUN_LS.promptSets)
+    if (raw === null) {
+        const migrated = migratePromptSets()
+        setPromptSets(migrated)
+        return migrated
+    }
+    const arr = readJson<Partial<PromptSet>[]>(RUN_LS.promptSets)
+    if (!Array.isArray(arr)) return []
+    return arr.map(normalizeSet)
 }
 
-export function setDefaultVariantOn(on: boolean): void {
-    localStorage.setItem(RUN_LS.defaultVariant, on ? '1' : '0')
+export function setPromptSets(list: PromptSet[]): void {
+    localStorage.setItem(RUN_LS.promptSets, JSON.stringify(list))
 }
 
-// Build the promptVariants run payload from the stored selection. Returns
-// undefined when only the Default variant is active (so the backend runs its
-// single default prompt and doesn't tag candidates with a variant name).
-export function buildPromptVariants(): PromptVariant[] | undefined {
+// Every enabled, named prompt set as a run payload (no collapsing). Pair mode
+// needs the full list so each pairing's variant name resolves on the backend.
+export function promptVariantPayload(sets: PromptSet[]): PromptVariant[] {
     const out: PromptVariant[] = []
-    if (getDefaultVariantOn()) out.push({name: 'Default'})
-    for (const v of getVariants()) {
+    for (const v of sets) {
         const name = v.name.trim()
         if (!v.enabled || !name) continue
         const variant: PromptVariant = {name}
@@ -138,11 +143,29 @@ export function buildPromptVariants(): PromptVariant[] | undefined {
         }
         out.push(variant)
     }
-    // A lone Default → let the backend use its single default prompt.
-    if (out.length <= 1 && (out.length === 0 || out[0].name === 'Default')) {
+    return out
+}
+
+// The promptVariants payload for cross mode. Returns undefined when only a
+// pristine Default is active (so the backend runs its single default prompt and
+// doesn't tag candidates with a variant name).
+export function promptVariantsFrom(sets: PromptSet[]): PromptVariant[] | undefined {
+    const out = promptVariantPayload(sets)
+    if (out.length === 0) return undefined
+    if (
+        out.length === 1 &&
+        out[0].name === 'Default' &&
+        !out[0].system &&
+        !out[0].dataset &&
+        !out[0].column
+    ) {
         return undefined
     }
     return out
+}
+
+export function buildPromptVariants(): PromptVariant[] | undefined {
+    return promptVariantsFrom(getPromptSets())
 }
 
 // --- Fetch defaults ---------------------------------------------------------
@@ -156,12 +179,10 @@ export async function fetchEvalDefaults(): Promise<EvalDefaults> {
 
 // --- Merge into a run request ----------------------------------------------
 // Returns the override slice to spread onto the base run body. Omits anything
-// the user hasn't customized so the backend keeps using its defaults.
+// the user hasn't customized so the backend keeps using its defaults. Prompt
+// customization now travels with the prompt library (promptVariants), not here.
 export function runOverrides(): Partial<EvalRunRequest> {
     const out: Partial<EvalRunRequest> = {}
-
-    const prompts = getPromptOverrides()
-    if (Object.keys(prompts).length) out.prompts = prompts
 
     const ds = getScoring('dataset')
     if (ds) {

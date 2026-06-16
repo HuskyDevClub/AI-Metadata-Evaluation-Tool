@@ -1345,41 +1345,140 @@ details.columns summary:hover {
     color: var(--text);
 }
 
-/* Prompt-variant editor rows */
-.variants-head {
+/* --- Generation builder: model/prompt pickers ---------------------------- */
+.builder-head {
     display: flex;
     align-items: baseline;
     gap: 2px;
-    margin: 12px 0 6px;
+    margin: 0 0 8px;
 }
 
-.variants-head .section-hint {
+.builder-head .section-hint {
     margin: 0;
 }
 
-.variant-row {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 12px;
-    margin-bottom: 8px;
-    background: #fbfcfd;
-}
-
-.variant-row > summary {
+.picker-row {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.add-select {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--accent);
+    background: var(--card);
     cursor: pointer;
-    list-style: none;
+}
+
+.custom-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.custom-add input[type="text"] {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--text);
+    background: white;
+}
+
+/* Draggable handle shared by model chips and prompt cards */
+.drag-handle {
+    color: var(--muted);
+    cursor: grab;
+    font-size: 13px;
+    line-height: 1;
     user-select: none;
 }
 
-.variant-row > summary::-webkit-details-marker {
-    display: none;
+.drag-handle:active {
+    cursor: grabbing;
 }
 
-.variant-name {
+/* Model chips */
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px 5px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: #eef3fb;
+    font-size: 12px;
+    cursor: grab;
+}
+
+.chip.dragging {
+    opacity: 0.55;
+    border-color: var(--accent);
+}
+
+.chip-label {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--text);
+}
+
+.chip-x {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 0;
+}
+
+.chip-x:hover {
+    color: #c93a3a;
+}
+
+/* Prompt-set cards (the prompt library) */
+.prompt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.prompt-set {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fbfcfd;
+}
+
+.prompt-set.dragging {
+    border-color: var(--accent);
+    opacity: 0.6;
+}
+
+.prompt-set.off {
+    opacity: 0.6;
+}
+
+.ps-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+}
+
+.ps-name {
     flex: 1 1 auto;
+    min-width: 0;
     padding: 5px 8px;
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -1389,15 +1488,68 @@ details.columns summary:hover {
     color: var(--text);
 }
 
-.kind-badge {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: var(--bar-track);
+.ps-body {
+    padding: 0 10px 10px 10px;
+    border-top: 1px solid var(--border);
+}
+
+.ps-body .section-hint {
+    margin: 10px 0;
+}
+
+.ps-body textarea {
+    font: 12px/1.5 ui-monospace, SFMono-Regular, monospace;
+}
+
+.combo-count {
+    margin: 12px 0 0;
+    font-size: 12px;
     color: var(--muted);
-    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.combo-count b {
+    color: var(--text);
+}
+
+/* Explicit model→prompt pairing rows (pair mode) */
+.pair-build {
+    margin-top: 10px;
+}
+
+.pair-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.pair-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pair-row select {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: white;
+}
+
+.pair-row.stale select {
+    border-color: #f0b429;
+    background: #fffbeb;
+}
+
+.pair-sep {
+    color: var(--muted);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
 }
 
 /* Single-candidate (absolute scoring) description block spans full width. */

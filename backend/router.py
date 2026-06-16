@@ -988,6 +988,26 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
     )
     n_variants = len(variants)
 
+    # Pair mode: explicit model↔prompt pairings. When provided, generated
+    # candidates are exactly these (model, variant) pairs instead of the
+    # model × variant cross below. Each pair's `variant` resolves by name against
+    # the variants above; a blank/unknown name falls back to the first variant.
+    variant_by_name = {v.name: v for v in variants}
+    default_variant = variants[0]
+    generator_pairs: list[tuple[str, Variant]] = []
+    if request.generatorPairs:
+        seen_pairs: set[tuple[str, str]] = set()
+        for p in request.generatorPairs:
+            model = (p.model or "").strip()[:200]
+            if not model:
+                continue
+            variant = variant_by_name.get((p.variant or "").strip(), default_variant)
+            key = (model, variant.name)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            generator_pairs.append((model, variant))
+
     # Resolve the judge metrics: request overrides win, else the built-in lists.
     dataset_categories = _categories_from_request(
         request.scoringCategoriesDataset, _DEFAULT_DATASET_CATEGORIES
@@ -1084,8 +1104,8 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                         specs.append(
                             CandidateSpec("existing-imported", _LABEL_IMPORTED)
                         )
-                    for gen_model in generator_models:
-                        for variant in variants:
+                    if generator_pairs:
+                        for gen_model, variant in generator_pairs:
                             specs.append(
                                 CandidateSpec(
                                     "generated",
@@ -1094,6 +1114,17 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                     variant=variant,
                                 )
                             )
+                    else:
+                        for gen_model in generator_models:
+                            for variant in variants:
+                                specs.append(
+                                    CandidateSpec(
+                                        "generated",
+                                        _gen_label(gen_model, variant.name, n_variants),
+                                        model=gen_model,
+                                        variant=variant,
+                                    )
+                                )
 
                     if not specs:
                         results.append(

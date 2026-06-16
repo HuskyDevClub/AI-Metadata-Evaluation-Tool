@@ -34,6 +34,14 @@ export interface PromptVariant {
     column?: string
 }
 
+// An explicit model↔prompt pairing — one generated candidate. `variant` names a
+// PromptVariant; when omitted the run's Default variant is used. Supplying pairs
+// replaces the default model × prompt cross.
+export interface GeneratorPair {
+    model: string
+    variant?: string
+}
+
 // A dataset supplied by the client (e.g. parsed from an Improvement-tool export).
 // The eval still loads it live from Socrata by `uid`; the description/column map
 // carry the existing curated metadata to validate.
@@ -199,6 +207,9 @@ export interface EvalRunRequest {
     // Generation axes. generatorModels may be empty (evaluate existing only).
     generatorModels?: string[]
     promptVariants?: PromptVariant[]
+    // Explicit model↔prompt pairings. When non-empty, generated candidates are
+    // exactly these pairs instead of the generatorModels × promptVariants cross.
+    generatorPairs?: GeneratorPair[]
     judgeModel?: string
     // Judge reliability. judgeSamples > 1 runs the judge N times and takes the
     // per-category median (self-consistency); 1 (default) runs once at temp 0.
