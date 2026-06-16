@@ -34,7 +34,29 @@ from .quality_checks import quality_checks
 
 logger = logging.getLogger(__name__)
 
-_CSV_PATH = Path(__file__).resolve().parent / "DatasetsWithSolidMetadata.csv"
+_CSV_DIR = Path(__file__).resolve().parent
+_DEFAULT_CSV_NAME = "DatasetsWithSolidMetadata.csv"
+
+
+def _resolve_csv_path(name: str | None) -> Path:
+    """Return the absolute path for a benchmark CSV filename.
+
+    Only filenames (no slashes, no ..) that end with .csv and live directly
+    inside the backend directory are accepted.  This prevents path-traversal.
+    """
+    filename = (name or "").strip() or _DEFAULT_CSV_NAME
+    # Guard: reject anything that contains path separators or ..
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV filename: {filename}")
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail=f"Not a CSV file: {filename}")
+    path = (_CSV_DIR / filename).resolve()
+    if not path.is_relative_to(_CSV_DIR) or not path.is_file():
+        raise HTTPException(
+            status_code=404, detail=f"Benchmark CSV not found: {filename}"
+        )
+    return path
+
 
 _FENCE_RE = re.compile(r"<<<\s*(?:END_)?UNTRUSTED_DATA\s*>>>", re.IGNORECASE)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]")
@@ -761,8 +783,8 @@ async def _judge_absolute(
     return {"candidate2": candidate2}, usage_total
 
 
-def _load_dataset_ids(limit: int | None) -> list[str]:
-    with open(_CSV_PATH, newline="", encoding="utf-8-sig") as f:
+def _load_dataset_ids(csv_path: Path, limit: int | None) -> list[str]:
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         ids = [r["UID"].strip() for r in reader if r.get("UID", "").strip()]
     if limit is not None:
@@ -780,8 +802,14 @@ class Descriptor:
     imported: ImportedDataset | None = None
 
 
-def _resolve_descriptors(request: EvalRunRequest) -> list[Descriptor]:
-    """Pick the dataset source: imported datasets, explicit UIDs, else the CSV."""
+def _resolve_descriptors(
+    request: EvalRunRequest,
+) -> tuple[list[Descriptor], Path | None]:
+    """Pick the dataset source: imported datasets, explicit UIDs, else the CSV.
+
+    Returns (descriptors, csv_path_used_or_None).
+    """
+    csv_path: Path | None = None
     if request.importedDatasets:
         descriptors = [
             Descriptor(
@@ -801,10 +829,11 @@ def _resolve_descriptors(request: EvalRunRequest) -> list[Descriptor]:
                 seen.add(uid)
                 descriptors.append(Descriptor(uid=uid))
     else:
-        descriptors = [Descriptor(uid=u) for u in _load_dataset_ids(None)]
+        csv_path = _resolve_csv_path(request.benchmarkCsv)
+        descriptors = [Descriptor(uid=u) for u in _load_dataset_ids(csv_path, None)]
     if request.datasetLimit is not None:
         descriptors = descriptors[: request.datasetLimit]
-    return descriptors
+    return descriptors, csv_path
 
 
 @dataclass
@@ -913,6 +942,18 @@ async def eval_defaults() -> dict[str, Any]:
     }
 
 
+@router.get("/api/eval/benchmark-csvs")
+async def benchmark_csvs() -> dict[str, Any]:
+    """List .csv files in the backend directory that can be used as benchmark
+    dataset sources.  Returns them sorted, with the default file first."""
+    csvs: list[str] = sorted(p.name for p in _CSV_DIR.glob("*.csv") if p.is_file())
+    # Ensure the default appears first if it exists.
+    if _DEFAULT_CSV_NAME in csvs:
+        csvs.remove(_DEFAULT_CSV_NAME)
+        csvs.insert(0, _DEFAULT_CSV_NAME)
+    return {"files": csvs, "default": _DEFAULT_CSV_NAME}
+
+
 @router.post("/api/eval/run")
 async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingResponse:
     # Per-run model overrides from the request; blank falls back to the env vars.
@@ -961,7 +1002,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
             detail=f"Missing required configuration for eval: {missing}",
         )
 
-    descriptors = _resolve_descriptors(request)
+    descriptors, csv_path_used = _resolve_descriptors(request)
     if not descriptors:
         raise HTTPException(
             status_code=400, detail="No datasets to evaluate (empty source)."
@@ -1446,7 +1487,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                     "judge_model": judge_model,
                     "llm_endpoint": LLM_ENDPOINT,
                     "dataset_source": dataset_source,
-                    "csv_source": _CSV_PATH.name if dataset_source == "csv" else None,
+                    "csv_source": csv_path_used.name if csv_path_used else None,
                     "dataset_limit": request.datasetLimit,
                     "eval_columns": request.evalColumns,
                     "max_columns_per_dataset": request.maxColumnsPerDataset,

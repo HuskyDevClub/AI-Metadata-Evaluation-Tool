@@ -204,6 +204,9 @@ export interface EvalRunRequest {
     // UID + curated metadata. When both omitted, the backend uses its CSV.
     datasetIds?: string[]
     importedDatasets?: ImportedDataset[]
+    // Which benchmark CSV file to use (filename only). When omitted the backend
+    // falls back to DatasetsWithSolidMetadata.csv.
+    benchmarkCsv?: string
     // Generation axes. generatorModels may be empty (evaluate existing only).
     generatorModels?: string[]
     promptVariants?: PromptVariant[]

@@ -103,6 +103,9 @@ class EvalRunRequest(BaseModel):
     # JSON export (which carry their UID plus the curated metadata to validate).
     datasetIds: list[str] | None = Field(default=None, max_length=200)
     importedDatasets: list[ImportedDataset] | None = Field(default=None, max_length=200)
+    # Which benchmark CSV to load UIDs from when the source is "csv". When
+    # omitted, the backend falls back to the default DatasetsWithSolidMetadata.csv.
+    benchmarkCsv: str | None = Field(default=None, max_length=200)
 
     # --- Generation axes ------------------------------------------------------
     # Each generator model is run against every dataset; an empty list means

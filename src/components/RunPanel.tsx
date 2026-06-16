@@ -253,6 +253,18 @@ export function RunPanel({
     const [imported, setImported] = useState<ImportedDataset[]>(readImported)
     const [importErrors, setImportErrors] = useState<string[]>([])
 
+    // --- Benchmark CSV file picker -------------------------------------------
+    const [csvUids, setCsvUids] = useState<string[]>(() => {
+        try {
+            return JSON.parse(localStorage.getItem(LS.benchmarkCsv) || '[]')
+        } catch {
+            return []
+        }
+    })
+    const [csvFileName, setCsvFileName] = useState(
+        () => localStorage.getItem('evalViewer.csvFileName') || '',
+    )
+
     // --- Generator models (dropdown + draggable chips) ----------------------
     const [models, setModels] = useState<string[]>(() => {
         const raw = localStorage.getItem(LS.gen) || ''
@@ -342,6 +354,8 @@ export function RunPanel({
     useEffect(() => localStorage.setItem(LS.goal, goal), [goal])
     useEffect(() => localStorage.setItem(LS.source, source), [source])
     useEffect(() => localStorage.setItem(LS.ids, datasetIds), [datasetIds])
+    useEffect(() => localStorage.setItem(LS.benchmarkCsv, JSON.stringify(csvUids)), [csvUids])
+    useEffect(() => localStorage.setItem('evalViewer.csvFileName', csvFileName), [csvFileName])
     useEffect(() => localStorage.setItem(LS.imported, JSON.stringify(imported)), [imported])
     useEffect(() => localStorage.setItem(LS.gen, models.join('\n')), [models])
     useEffect(() => localStorage.setItem(LS.judge, judgeModel), [judgeModel])
@@ -374,6 +388,43 @@ export function RunPanel({
         for (const d of datasets) byUid.set(d.uid, d)
         setImported([...byUid.values()])
         setImportErrors(errors)
+    }
+
+    const onPickCsvFile = (e: ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        e.target.value = ''
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => {
+            const text = reader.result as string
+            const lines = text.split(/\r?\n/)
+            if (lines.length < 2) {
+                setCsvUids([]);
+                setCsvFileName(file.name);
+                return
+            }
+            // Find the UID column index from the header row.
+            const headers = lines[0].split(',')
+            const uidIdx = headers.findIndex((h) => h.trim().replace(/^"|"$/g, '').toUpperCase() === 'UID')
+            if (uidIdx < 0) {
+                setCsvUids([]);
+                setCsvFileName(file.name);
+                return
+            }
+            const uids: string[] = []
+            const seen = new Set<string>()
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',')
+                const uid = (cols[uidIdx] ?? '').trim().replace(/^"|"$/g, '')
+                if (uid && !seen.has(uid)) {
+                    seen.add(uid);
+                    uids.push(uid)
+                }
+            }
+            setCsvUids(uids)
+            setCsvFileName(file.name)
+        }
+        reader.readAsText(file)
     }
 
     // --- Model helpers ------------------------------------------------------
@@ -474,11 +525,15 @@ export function RunPanel({
     // --- Derived: how many datasets, and a plain-language run summary --------
     const idCount = parseDatasetIds(datasetIds).length
     const limitNum = parseInt(limit, 10) || RUN_DEFAULTS.limit
+    const csvCount = csvUids.length
     const sourceReady =
-        source === 'csv' || (source === 'ids' && idCount > 0) || (source === 'import' && imported.length > 0)
+        (source === 'csv' && csvCount > 0) || (source === 'ids' && idCount > 0) || (source === 'import' && imported.length > 0)
 
     const datasetPhrase = (() => {
-        if (source === 'csv') return `up to ${limitNum} benchmark dataset${limitNum === 1 ? '' : 's'}`
+        if (source === 'csv') {
+            const n = Math.min(csvCount, limitNum)
+            return `${n} benchmark dataset${n === 1 ? '' : 's'}`
+        }
         const n = Math.min(source === 'ids' ? idCount : imported.length, limitNum)
         return `${n} dataset${n === 1 ? '' : 's'}`
     })()
@@ -498,7 +553,8 @@ export function RunPanel({
     let summary = ''
     if (!sourceReady) {
         blockReason =
-            source === 'ids' ? 'Enter at least one dataset UID.' : 'Import at least one metadata JSON file.'
+            source === 'csv' ? 'Select a benchmark CSV file with a UID column.'
+                : source === 'ids' ? 'Enter at least one dataset UID.' : 'Import at least one metadata JSON file.'
     } else if (goal === 'validate') {
         const parts: string[] = []
         if (liveOn) parts.push('live data.wa.gov')
@@ -559,6 +615,7 @@ export function RunPanel({
             evalColumns: evalCols,
             maxColumnsPerDataset: parseInt(maxCols, 10) || RUN_DEFAULTS.maxCols,
         }
+        if (source === 'csv' && csvUids.length > 0) body.datasetIds = csvUids
         if (source === 'ids') body.datasetIds = parseDatasetIds(datasetIds)
         if (source === 'import') body.importedDatasets = imported
 
@@ -660,9 +717,40 @@ export function RunPanel({
                     </div>
 
                     {source === 'csv' && (
-                        <p className="section-hint">
-                            Uses the bundled <code>DatasetsWithSolidMetadata.csv</code> on the backend.
-                        </p>
+                        <div className="settings-field">
+                            <div className="import-row">
+                                <label className="run-btn io-import">
+                                    Choose CSV…
+                                    <input
+                                        type="file"
+                                        accept=".csv,text/csv"
+                                        hidden
+                                        onChange={onPickCsvFile}
+                                    />
+                                </label>
+                                {csvFileName && (
+                                    <button
+                                        type="button"
+                                        className="reset-btn"
+                                        onClick={() => {
+                                            setCsvUids([])
+                                            setCsvFileName('')
+                                        }}
+                                    >
+                                        clear
+                                    </button>
+                                )}
+                            </div>
+                            {csvFileName ? (
+                                <p className="section-hint">
+                                    <code>{csvFileName}</code> — {csvUids.length} UID{csvUids.length === 1 ? '' : 's'} found
+                                </p>
+                            ) : (
+                                <p className="section-hint">
+                                    Select a <code>.csv</code> file with a <code>UID</code> column.
+                                </p>
+                            )}
+                        </div>
                     )}
                     {source === 'ids' && (
                         <label className="settings-field">

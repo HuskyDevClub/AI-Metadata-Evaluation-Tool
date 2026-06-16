@@ -11,6 +11,7 @@ export const RUN_LS = {
     // Dataset source + candidate/comparison knobs.
     source: 'evalViewer.runSource',
     ids: 'evalViewer.runDatasetIds',
+    benchmarkCsv: 'evalViewer.runBenchmarkCsv',
     imported: 'evalViewer.runImportedDatasets',
     evalLive: 'evalViewer.runEvaluateLive',
     evalImported: 'evalViewer.runEvaluateImported',

@@ -194,6 +194,19 @@ export async function fetchEvalDefaults(): Promise<EvalDefaults> {
     return (await resp.json()) as EvalDefaults
 }
 
+export interface BenchmarkCsvList {
+    files: string[]
+    default: string
+}
+
+export async function fetchBenchmarkCsvs(): Promise<BenchmarkCsvList> {
+    const resp = await fetch(`${getApiBaseUrl()}/api/eval/benchmark-csvs`, {
+        headers: {'X-Requested-With': 'fetch'},
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+    return (await resp.json()) as BenchmarkCsvList
+}
+
 // --- Merge into a run request ----------------------------------------------
 // Returns the override slice to spread onto the base run body. Omits anything
 // the user hasn't customized so the backend keeps using its defaults. Prompt
