@@ -821,13 +821,18 @@ def _resolve_descriptors(
             if d.uid.strip()
         ]
     elif request.datasetIds:
-        seen: set[str] = set()
+        # Each ref carries an optional portal domain (parsed client-side from a
+        # pasted dataset URL); blank → data.wa.gov. Dedupe on (uid, domain) so the
+        # same UID on two portals is two distinct datasets.
+        seen: set[tuple[str, str]] = set()
         descriptors = []
-        for raw in request.datasetIds:
-            uid = (raw or "").strip()
-            if uid and uid not in seen:
-                seen.add(uid)
-                descriptors.append(Descriptor(uid=uid))
+        for ref in request.datasetIds:
+            uid = (ref.uid or "").strip()
+            domain = (ref.domain or "data.wa.gov").strip() or "data.wa.gov"
+            key = (uid, domain)
+            if uid and key not in seen:
+                seen.add(key)
+                descriptors.append(Descriptor(uid=uid, domain=domain))
     else:
         csv_path = _resolve_csv_path(request.benchmarkCsv)
         descriptors = [Descriptor(uid=u) for u in _load_dataset_ids(csv_path, None)]

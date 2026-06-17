@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -81,6 +81,17 @@ class ImportedDataset(BaseModel):
         return self
 
 
+class DatasetRef(BaseModel):
+    """One dataset to evaluate, identified by Socrata UID. `domain` is the portal
+    host the UID lives on, parsed client-side from a pasted dataset URL; blank →
+    the default data.wa.gov. Accepts either a bare UID string or a {uid, domain}
+    object on the wire (see `EvalRunRequest._coerce_dataset_ids`), so older
+    clients that send a plain list of UID strings keep working."""
+
+    uid: str = Field(min_length=1, max_length=64)
+    domain: str | None = Field(default=None, max_length=200)
+
+
 class EvalRunRequest(BaseModel):
     """Request body for the metadata eval run (POST /api/eval/run).
 
@@ -101,7 +112,7 @@ class EvalRunRequest(BaseModel):
     # --- Dataset source (first non-empty wins; else the bundled CSV) ----------
     # Explicit Socrata UIDs, or datasets imported from the Improvement tool's
     # JSON export (which carry their UID plus the curated metadata to validate).
-    datasetIds: list[str] | None = Field(default=None, max_length=200)
+    datasetIds: list[DatasetRef] | None = Field(default=None, max_length=200)
     importedDatasets: list[ImportedDataset] | None = Field(default=None, max_length=200)
     # Which benchmark CSV to load UIDs from when the source is "csv". When
     # omitted, the backend falls back to the default DatasetsWithSolidMetadata.csv.
@@ -149,3 +160,12 @@ class EvalRunRequest(BaseModel):
     scoringCategoriesColumn: list[ScoringCategory] | None = Field(
         default=None, max_length=30
     )
+
+    @field_validator("datasetIds", mode="before")
+    @classmethod
+    def _coerce_dataset_ids(cls, v: object) -> object:
+        """Accept bare UID strings alongside {uid, domain} objects so clients
+        that still send a plain list of UID strings keep working."""
+        if not isinstance(v, list):
+            return v
+        return [{"uid": item} if isinstance(item, str) else item for item in v]
