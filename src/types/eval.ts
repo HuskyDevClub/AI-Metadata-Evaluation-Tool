@@ -205,9 +205,12 @@ export interface DatasetRef {
 
 // --- Run request -----------------------------------------------------------
 export interface EvalRunRequest {
-    datasetLimit: number
+    // datasetLimit / maxColumnsPerDataset cap the benchmark-CSV source only (a
+    // large, un-curated list). For explicit-UID and imported sources they are
+    // sent as null = no cap, since the user already chose the exact set.
+    datasetLimit: number | null
     evalColumns: boolean
-    maxColumnsPerDataset: number
+    maxColumnsPerDataset: number | null
     // Dataset source: explicit Socrata UIDs, or imported datasets carrying their
     // UID + curated metadata. When both omitted, the backend uses its CSV. UIDs
     // may be bare strings or {uid, domain} refs (the backend coerces strings).

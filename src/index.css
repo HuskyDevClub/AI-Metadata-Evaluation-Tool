@@ -22,6 +22,40 @@ body {
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* --- Shared utilities --------------------------------------------------- */
+/* .field — base look for text/number inputs, textareas and selects. The
+   container rules elsewhere add only their own width / flex / font-size. */
+.field,
+.run-panel input[type="text"],
+.run-panel input[type="number"],
+.run-panel textarea,
+.custom-add input[type="text"],
+.settings-field input[type="text"],
+.settings-field input[type="number"],
+.settings-field textarea,
+.pricing-add input[type="text"],
+.pricing-add input[type="number"],
+.pair-row select {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    color: var(--text);
+    background: white;
+}
+
+/* .eyebrow — the small uppercase label used for section and field headings. */
+.eyebrow,
+.rate-group-label,
+.desc-block .label,
+.reasoning .label,
+.settings-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 header {
     background: var(--card);
     border-bottom: 1px solid var(--border);
@@ -51,7 +85,8 @@ header h1 {
     font-weight: 500;
 }
 
-.file-btn:hover {
+.file-btn:hover,
+.run-btn.run-go:hover {
     filter: brightness(0.95);
 }
 
@@ -176,11 +211,7 @@ main {
 }
 
 .rate-group-label {
-    font-weight: 600;
     color: var(--text);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     margin-right: 4px;
 }
 
@@ -282,10 +313,6 @@ main {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     margin-bottom: 6px;
 }
 
@@ -419,10 +446,6 @@ main {
 }
 
 .reasoning .label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--muted);
     margin-bottom: 4px;
 }
@@ -441,7 +464,9 @@ details.columns summary {
     user-select: none;
 }
 
-details.columns summary:hover {
+details.columns summary:hover,
+.pricing-builtin summary:hover,
+.advanced > summary:hover {
     text-decoration: underline;
 }
 
@@ -646,7 +671,10 @@ details.columns summary:hover {
     filter: none;
 }
 
-.run-panel input:disabled {
+/* Disabled form fields (run panel + settings) share one dimmed style */
+.run-panel input:disabled,
+.run-panel textarea:disabled,
+.settings-field input:disabled {
     opacity: 0.55;
     cursor: not-allowed;
 }
@@ -657,11 +685,8 @@ details.columns summary:hover {
     border-color: var(--gen);
 }
 
-.run-btn.run-go:hover {
-    filter: brightness(0.95);
-}
-
-.run-btn.run-cancel {
+.run-btn.run-cancel,
+.run-btn.danger-btn {
     border-color: #c93a3a;
     color: #c93a3a;
 }
@@ -696,16 +721,6 @@ details.columns summary:hover {
     padding-bottom: 6px;
 }
 
-.run-panel input[type="text"],
-.run-panel input[type="number"] {
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    color: var(--text);
-    background: white;
-}
-
 .run-panel input[type="number"] {
     width: 88px;
 }
@@ -716,18 +731,7 @@ details.columns summary:hover {
 
 .run-panel textarea {
     width: 220px;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    color: var(--text);
-    background: white;
     resize: vertical;
-}
-
-.run-panel textarea:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
 }
 
 .run-status {
@@ -820,9 +824,6 @@ details.columns summary:hover {
 
 .settings-section h3 {
     margin: 0 0 4px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--text);
 }
 
@@ -863,18 +864,7 @@ details.columns summary:hover {
 .settings-field input[type="text"],
 .settings-field input[type="number"],
 .settings-field textarea {
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    color: var(--text);
-    background: white;
     width: 100%;
-}
-
-.settings-field input:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
 }
 
 .settings-field textarea {
@@ -925,20 +915,10 @@ details.columns summary:hover {
 .pricing-add input[type="text"] {
     flex: 1 1 auto;
     min-width: 0;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    background: white;
 }
 
 .pricing-add input[type="number"] {
     width: 56px;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    background: white;
     font-variant-numeric: tabular-nums;
 }
 
@@ -953,18 +933,9 @@ details.columns summary:hover {
     user-select: none;
 }
 
-.pricing-builtin summary:hover {
-    text-decoration: underline;
-}
-
 .pricing-builtin .pricing-list {
     margin-top: 10px;
     margin-bottom: 0;
-}
-
-.run-btn.danger-btn {
-    border-color: #c93a3a;
-    color: #c93a3a;
 }
 
 .run-btn.danger-btn:hover {
@@ -1274,10 +1245,6 @@ details.columns summary:hover {
     user-select: none;
 }
 
-.advanced > summary:hover {
-    text-decoration: underline;
-}
-
 /* Segmented control (dataset source) */
 .seg {
     display: inline-flex;
@@ -1411,15 +1378,6 @@ details.columns summary:hover {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-}
-
-.custom-add input[type="text"] {
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
-    color: var(--text);
-    background: white;
 }
 
 /* Draggable handle shared by model chips and prompt cards */
@@ -1573,13 +1531,7 @@ details.columns summary:hover {
 .pair-row select {
     flex: 1 1 0;
     min-width: 0;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font: inherit;
     font-size: 13px;
-    color: var(--text);
-    background: white;
 }
 
 .pair-row.stale select {

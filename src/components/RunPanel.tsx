@@ -23,6 +23,7 @@ import {
 import {getModelSuggestions} from '@/utils/pricing'
 import {moveItem} from '@/utils/array'
 import {importDatasetsFromFiles} from '@/utils/datasetImport'
+import {parseCsv} from '@/utils/csv'
 
 function readBool(key: string, fallback: boolean): boolean {
     const s = localStorage.getItem(key)
@@ -247,9 +248,12 @@ export function RunPanel({
     const [goal, setGoal] = useState<RunGoal>(
         () => (localStorage.getItem(LS.goal) as RunGoal) || RUN_DEFAULTS.goal,
     )
-    const [source, setSource] = useState<RunSource>(
-        () => (localStorage.getItem(LS.source) as RunSource) || RUN_DEFAULTS.source,
-    )
+    const [source, setSource] = useState<RunSource>(() => {
+        const stored = (localStorage.getItem(LS.source) as RunSource) || RUN_DEFAULTS.source
+        const storedGoal = (localStorage.getItem(LS.goal) as RunGoal) || RUN_DEFAULTS.goal
+        // Import is Validate-only — never start on it under the Generate goal.
+        return storedGoal === 'generate' && stored === 'import' ? 'ids' : stored
+    })
     // UIDs build up list-by-list: paste a batch (bare ids or dataset URLs, any
     // portal) into the draft, "Add" parses + dedupes it into the chip list. The
     // chip list of {uid, domain?} refs is the source of truth; it persists to
@@ -410,16 +414,14 @@ export function RunPanel({
         if (!file) return
         const reader = new FileReader()
         reader.onload = () => {
-            const text = reader.result as string
-            const lines = text.split(/\r?\n/)
-            if (lines.length < 2) {
+            const rows = parseCsv(reader.result as string)
+            if (rows.length < 2) {
                 setCsvUids([]);
                 setCsvFileName(file.name);
                 return
             }
             // Find the UID column index from the header row.
-            const headers = lines[0].split(',')
-            const uidIdx = headers.findIndex((h) => h.trim().replace(/^"|"$/g, '').toUpperCase() === 'UID')
+            const uidIdx = rows[0].findIndex((h) => h.trim().toUpperCase() === 'UID')
             if (uidIdx < 0) {
                 setCsvUids([]);
                 setCsvFileName(file.name);
@@ -427,9 +429,8 @@ export function RunPanel({
             }
             const uids: string[] = []
             const seen = new Set<string>()
-            for (let i = 1; i < lines.length; i++) {
-                const cols = lines[i].split(',')
-                const uid = (cols[uidIdx] ?? '').trim().replace(/^"|"$/g, '')
+            for (let i = 1; i < rows.length; i++) {
+                const uid = (rows[i][uidIdx] ?? '').trim()
                 if (uid && !seen.has(uid)) {
                     seen.add(uid);
                     uids.push(uid)
@@ -570,7 +571,7 @@ export function RunPanel({
             const n = Math.min(csvCount, limitNum)
             return `${n} benchmark dataset${n === 1 ? '' : 's'}`
         }
-        const n = Math.min(source === 'ids' ? idCount : imported.length, limitNum)
+        const n = source === 'ids' ? idCount : imported.length
         return `${n} dataset${n === 1 ? '' : 's'}`
     })()
 
@@ -581,7 +582,10 @@ export function RunPanel({
     if (compareMode === 'prompts') candidateCount = variantCount
     else if (compareMode === 'models') candidateCount = models.length
     else candidateCount = pairMode ? validPairs.length : Math.max(models.length, 1) * Math.max(variantCount, 1)
-    const liveOn = evalLive
+    // Live (portal) metadata is the only thing to score for the CSV / paste-UID
+    // sources, so it is always on there; for Import it is an explicit choice
+    // alongside the curated metadata.
+    const liveOn = source === 'import' ? evalLive : true
     const importedOn = source === 'import' && evalImported
 
     // Validation + the summary sentence shown in the footer.
@@ -593,13 +597,11 @@ export function RunPanel({
                 : source === 'ids' ? 'Enter at least one dataset UID.' : 'Import at least one metadata JSON file.'
     } else if (goal === 'validate') {
         const parts: string[] = []
-        if (liveOn) parts.push('live data.wa.gov')
+        if (liveOn) parts.push('live portal')
         if (importedOn) parts.push('imported')
         if (!parts.length) {
-            blockReason =
-                source === 'import'
-                    ? 'Pick the live and/or imported metadata to score.'
-                    : 'Tick “live data.wa.gov metadata” to score it.'
+            // Only reachable for Import — CSV / paste-UID always score live.
+            blockReason = 'Pick the live and/or imported metadata to score.'
         } else {
             summary = `Score the ${parts.join(' and ')} metadata of ${datasetPhrase}.`
         }
@@ -646,10 +648,14 @@ export function RunPanel({
 
     const start = () => {
         if (blockReason) return
+        // The dataset/column caps only apply to the benchmark CSV. For explicit
+        // UIDs and imported files the user picked the exact set, so send null
+        // (= no cap) and run/score them all.
+        const isCsv = source === 'csv'
         const body: EvalRunRequest = {
-            datasetLimit: limitNum,
+            datasetLimit: isCsv ? limitNum : null,
             evalColumns: evalCols,
-            maxColumnsPerDataset: parseInt(maxCols, 10) || RUN_DEFAULTS.maxCols,
+            maxColumnsPerDataset: isCsv ? parseInt(maxCols, 10) || RUN_DEFAULTS.maxCols : null,
         }
         if (source === 'csv' && csvUids.length > 0) body.datasetIds = csvUids
         if (source === 'ids') body.datasetIds = uidList
@@ -720,7 +726,11 @@ export function RunPanel({
                                 type="button"
                                 className={`goal-card${goal === g.key ? ' active' : ''}`}
                                 aria-pressed={goal === g.key}
-                                onClick={() => setGoal(g.key)}
+                                onClick={() => {
+                                    setGoal(g.key)
+                                    // Import is Validate-only; drop it when switching to Generate.
+                                    if (g.key === 'generate' && source === 'import') setSource('ids')
+                                }}
                             >
                                 <span className="goal-icon">{g.icon}</span>
                                 <span className="goal-title">{g.title}</span>
@@ -738,7 +748,8 @@ export function RunPanel({
                             [
                                 ['csv', 'Benchmark CSV'],
                                 ['ids', 'Paste UIDs'],
-                                ['import', 'Import JSON'],
+                                // Import is Validate-only (generation ignores curated metadata).
+                                ...(goal === 'generate' ? [] : [['import', 'Import JSON']]),
                             ] as [RunSource, string][]
                         ).map(([val, label]) => (
                             <button
@@ -818,7 +829,7 @@ export function RunPanel({
                                 <>
                                     <div className="import-row">
                                         <span className="section-hint">
-                                            {uidList.length} UID{uidList.length === 1 ? '' : 's'} — drag to reorder; the first {limit} run
+                                            {uidList.length} UID{uidList.length === 1 ? '' : 's'} — drag to reorder
                                         </span>
                                         <button
                                             type="button"
@@ -920,17 +931,21 @@ export function RunPanel({
                         </div>
                     )}
 
+                    {/* Max datasets / Max columns cap the benchmark CSV only — for
+                        explicit UIDs and imported files the chosen set runs in full. */}
                     <div className="field-grid">
-                        <label className="settings-field">
-                            Max datasets
-                            <input
-                                type="number"
-                                min={1}
-                                max={200}
-                                value={limit}
-                                onChange={(e) => setLimit(e.target.value)}
-                            />
-                        </label>
+                        {source === 'csv' && (
+                            <label className="settings-field">
+                                Max datasets
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={200}
+                                    value={limit}
+                                    onChange={(e) => setLimit(e.target.value)}
+                                />
+                            </label>
+                        )}
                         <label className="settings-field row">
                             <input
                                 type="checkbox"
@@ -939,46 +954,50 @@ export function RunPanel({
                             />
                             Evaluate columns
                         </label>
-                        <label className="settings-field">
-                            Max columns / dataset (-1 = all)
-                            <input
-                                type="number"
-                                min={-1}
-                                max={100}
-                                value={maxCols}
-                                disabled={!evalCols}
-                                onChange={(e) => setMaxCols(e.target.value)}
-                            />
-                        </label>
+                        {source === 'csv' && (
+                            <label className="settings-field">
+                                Max columns / dataset (-1 = all)
+                                <input
+                                    type="number"
+                                    min={-1}
+                                    max={100}
+                                    value={maxCols}
+                                    disabled={!evalCols}
+                                    onChange={(e) => setMaxCols(e.target.value)}
+                                />
+                            </label>
+                        )}
                     </div>
                 </section>
 
                 {/* --- Goal-specific ----------------------------------------- */}
                 {goal === 'validate' ? (
-                    <section className="settings-section">
-                        <h3>Score which metadata?</h3>
-                        <p className="section-hint">
-                            The judge gives an absolute rubric score for each — no comparison.
-                        </p>
-                        <label className="settings-field row">
-                            <input
-                                type="checkbox"
-                                checked={evalLive}
-                                onChange={(e) => setEvalLive(e.target.checked)}
-                            />
-                            Live data.wa.gov metadata
-                        </label>
-                        <label className="settings-field row">
-                            <input
-                                type="checkbox"
-                                checked={evalImported}
-                                disabled={source !== 'import'}
-                                onChange={(e) => setEvalImported(e.target.checked)}
-                            />
-                            Imported (curated) metadata
-                            {source !== 'import' && <span className="muted"> — needs Import JSON</span>}
-                        </label>
-                    </section>
+                    // CSV / paste-UID sources have only the live portal metadata to
+                    // score (done implicitly), so the chooser shows for Import only.
+                    source === 'import' ? (
+                        <section className="settings-section">
+                            <h3>Score which metadata?</h3>
+                            <p className="section-hint">
+                                The judge gives an absolute rubric score for each — no comparison.
+                            </p>
+                            <label className="settings-field row">
+                                <input
+                                    type="checkbox"
+                                    checked={evalLive}
+                                    onChange={(e) => setEvalLive(e.target.checked)}
+                                />
+                                Live portal metadata
+                            </label>
+                            <label className="settings-field row">
+                                <input
+                                    type="checkbox"
+                                    checked={evalImported}
+                                    onChange={(e) => setEvalImported(e.target.checked)}
+                                />
+                                Imported (curated) metadata
+                            </label>
+                        </section>
+                    ) : null
                 ) : (
                     <section className="settings-section">
                         <h3>Generation</h3>
