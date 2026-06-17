@@ -1,8 +1,9 @@
 import {type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState} from 'react'
-import type {EvalDefaults, EvalRunRequest, ImportedDataset} from '@/types/eval'
+import type {DatasetRef, EvalDefaults, EvalRunRequest, ImportedDataset} from '@/types/eval'
 import {
     type CompareMode,
-    parseDatasetIds,
+    datasetRefToken,
+    parseDatasetRefs,
     RUN_DEFAULTS,
     RUN_LS as LS,
     type RunGoal,
@@ -249,7 +250,17 @@ export function RunPanel({
     const [source, setSource] = useState<RunSource>(
         () => (localStorage.getItem(LS.source) as RunSource) || RUN_DEFAULTS.source,
     )
-    const [datasetIds, setDatasetIds] = useState(() => localStorage.getItem(LS.ids) || '')
+    // UIDs build up list-by-list: paste a batch (bare ids or dataset URLs, any
+    // portal) into the draft, "Add" parses + dedupes it into the chip list. The
+    // chip list of {uid, domain?} refs is the source of truth; it persists to
+    // LS.ids as newline-joined tokens (bare UID, or `domain/uid` for non-default
+    // portals) so the old textarea format still seeds cleanly.
+    const [uidList, setUidList] = useState<DatasetRef[]>(() =>
+        parseDatasetRefs(localStorage.getItem(LS.ids) || ''),
+    )
+    const [uidDraft, setUidDraft] = useState('')
+    const uidDrag = useDragReorder(uidList, setUidList)
+    const uidKey = (r: DatasetRef) => `${r.domain ?? ''}|${r.uid}`
     const [imported, setImported] = useState<ImportedDataset[]>(readImported)
     const [importErrors, setImportErrors] = useState<string[]>([])
 
@@ -353,7 +364,10 @@ export function RunPanel({
 
     useEffect(() => localStorage.setItem(LS.goal, goal), [goal])
     useEffect(() => localStorage.setItem(LS.source, source), [source])
-    useEffect(() => localStorage.setItem(LS.ids, datasetIds), [datasetIds])
+    useEffect(
+        () => localStorage.setItem(LS.ids, uidList.map(datasetRefToken).join('\n')),
+        [uidList],
+    )
     useEffect(() => localStorage.setItem(LS.benchmarkCsv, JSON.stringify(csvUids)), [csvUids])
     useEffect(() => localStorage.setItem('evalViewer.csvFileName', csvFileName), [csvFileName])
     useEffect(() => localStorage.setItem(LS.imported, JSON.stringify(imported)), [imported])
@@ -426,6 +440,28 @@ export function RunPanel({
         }
         reader.readAsText(file)
     }
+
+    // --- UID helpers (one entry → chip) -------------------------------------
+    // Parse the draft (a single bare id or dataset URL from any portal), append
+    // the new ref, drop dupes (by uid+domain), and clear the draft for the next
+    // entry. parseDatasetRefs tolerates a stray paste of several lines, but the
+    // input is single-line so the usual case is one dataset.
+    const addUids = () => {
+        const parsed = parseDatasetRefs(uidDraft)
+        if (!parsed.length) return
+        const have = new Set(uidList.map(uidKey))
+        const next = [...uidList]
+        for (const ref of parsed) {
+            if (!have.has(uidKey(ref))) {
+                have.add(uidKey(ref))
+                next.push(ref)
+            }
+        }
+        setUidList(next)
+        setUidDraft('')
+    }
+    const removeUid = (ref: DatasetRef) =>
+        setUidList(uidList.filter((x) => uidKey(x) !== uidKey(ref)))
 
     // --- Model helpers ------------------------------------------------------
     const addModel = (m: string) => {
@@ -523,7 +559,7 @@ export function RunPanel({
     )
 
     // --- Derived: how many datasets, and a plain-language run summary --------
-    const idCount = parseDatasetIds(datasetIds).length
+    const idCount = uidList.length
     const limitNum = parseInt(limit, 10) || RUN_DEFAULTS.limit
     const csvCount = csvUids.length
     const sourceReady =
@@ -616,7 +652,7 @@ export function RunPanel({
             maxColumnsPerDataset: parseInt(maxCols, 10) || RUN_DEFAULTS.maxCols,
         }
         if (source === 'csv' && csvUids.length > 0) body.datasetIds = csvUids
-        if (source === 'ids') body.datasetIds = parseDatasetIds(datasetIds)
+        if (source === 'ids') body.datasetIds = uidList
         if (source === 'import') body.importedDatasets = imported
 
         if (goal === 'generate') {
@@ -753,15 +789,87 @@ export function RunPanel({
                         </div>
                     )}
                     {source === 'ids' && (
-                        <label className="settings-field">
-                            Dataset UIDs (one per line)
-                            <textarea
-                                rows={4}
-                                placeholder="abcd-1234&#10;wxyz-5678"
-                                value={datasetIds}
-                                onChange={(e) => setDatasetIds(e.target.value)}
-                            />
-                        </label>
+                        <div className="settings-field">
+                            Dataset UID or URL
+                            <div className="uid-add">
+                                <input
+                                    type="text"
+                                    placeholder="abcd-1234 or https://data.seattle.gov/d/wxyz-5678"
+                                    value={uidDraft}
+                                    onChange={(e) => setUidDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        // Enter adds the dataset without leaving the field.
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault()
+                                            addUids()
+                                        }
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    className="run-btn"
+                                    disabled={!uidDraft.trim()}
+                                    onClick={addUids}
+                                >
+                                    Add
+                                </button>
+                            </div>
+                            {uidList.length > 0 ? (
+                                <>
+                                    <div className="import-row">
+                                        <span className="section-hint">
+                                            {uidList.length} UID{uidList.length === 1 ? '' : 's'} — drag to reorder; the first {limit} run
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="reset-btn"
+                                            onClick={() => setUidList([])}
+                                        >
+                                            clear {uidList.length}
+                                        </button>
+                                    </div>
+                                    <div className="chip-row">
+                                        {uidList.map((ref, i) => {
+                                            const d = uidDrag.dragProps(i)
+                                            return (
+                                                <span
+                                                    key={uidKey(ref)}
+                                                    className={`chip${d.active ? ' dragging' : ''}`}
+                                                    draggable
+                                                    onDragStart={d.onDragStart}
+                                                    onDragEnter={d.onDragEnter}
+                                                    onDragOver={d.onDragOver}
+                                                    onDragEnd={d.onDragEnd}
+                                                    title={ref.domain ? `${ref.uid} on ${ref.domain}` : ref.uid}
+                                                >
+                                                    <span className="drag-handle" aria-hidden>
+                                                        ⠿
+                                                    </span>
+                                                    <span className="chip-label">{ref.uid}</span>
+                                                    {ref.domain && (
+                                                        <span className="chip-domain">{ref.domain}</span>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        className="chip-x"
+                                                        aria-label={`Remove ${ref.uid}`}
+                                                        onClick={() => removeUid(ref)}
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </span>
+                                            )
+                                        })}
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="section-hint">
+                                    Enter a UID or full dataset URL, then “Add” — one dataset at a
+                                    time. URLs are converted to their UID automatically — a URL from
+                                    another Socrata portal keeps its domain so it’s loaded from there.
+                                </p>
+                            )}
+                        </div>
                     )}
                     {source === 'import' && (
                         <div className="settings-field">

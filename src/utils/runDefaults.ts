@@ -2,6 +2,8 @@
 // run) and the Settings drawer (which edits them as global defaults). Both read
 // and write the same localStorage keys, so they stay in sync.
 
+import type {DatasetRef} from '@/types/eval'
+
 export const RUN_LS = {
     gen: 'evalViewer.runGeneratorModels',
     judge: 'evalViewer.runJudgeModel',
@@ -66,12 +68,64 @@ export function parseGeneratorModels(text: string): string[] {
     return seen
 }
 
-// Parse a UID textarea (one per line, commas tolerated) into a deduped list.
-export function parseDatasetIds(text: string): string[] {
-    const seen: string[] = []
-    for (const chunk of text.split(/[\n,]/)) {
-        const id = chunk.trim()
-        if (id && !seen.includes(id)) seen.push(id)
+// The portal these UIDs resolve to unless a pasted URL says otherwise; matches
+// the backend default. A ref on this portal is stored bare (no domain).
+export const DEFAULT_DATASET_DOMAIN = 'data.wa.gov'
+
+// A Socrata UID is two 4-char alphanumeric blocks; it can appear bare or as the
+// last path segment of a dataset URL (…/data.wa.gov/d/abcd-1234, …?foo=bar).
+const DATASET_ID_PATTERN = /(?:^|\/)([a-z0-9]{4}-[a-z0-9]{4})(?:$|\/|\?|#)/i
+
+// Pull a UID out of one pasted token — a bare id or a full dataset URL. Returns
+// null when the token has a path/scheme (so it's URL-shaped) but no UID in it;
+// a slash-free token with no match is kept as-is so hand-typed ids still pass.
+export function extractDatasetId(input: string): string | null {
+    const raw = input.trim()
+    if (!raw) return null
+    const m = raw.match(DATASET_ID_PATTERN)
+    if (m) return m[1].toLowerCase()
+    return raw.includes('/') ? null : raw
+}
+
+// Pull the portal host out of a pasted dataset URL. Null for a bare UID (which
+// has no host) so it falls back to the default portal.
+export function extractDomain(input: string): string | null {
+    const raw = input.trim()
+    // A bare UID has no path; only URL-shaped tokens carry a portal host.
+    if (!raw || !raw.includes('/')) return null
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+    try {
+        const host = new URL(withScheme).hostname.toLowerCase()
+        return host.includes('.') ? host : null
+    } catch {
+        return null
     }
-    return seen
+}
+
+// Parse a UID blob (one dataset per line; bare ids or dataset URLs) into deduped
+// {uid, domain?} refs. Lines are not split on commas, so a dataset URL carrying
+// a comma (e.g. a query param) stays intact. A URL on the default portal
+// collapses to a bare UID; only non-default portals keep their domain, so the
+// same UID typed bare and as a default-portal URL dedupe together.
+export function parseDatasetRefs(text: string): DatasetRef[] {
+    const out: DatasetRef[] = []
+    const seen = new Set<string>()
+    for (const chunk of text.split(/\r?\n/)) {
+        const uid = extractDatasetId(chunk)
+        if (!uid) continue
+        const host = extractDomain(chunk)
+        const domain = host && host !== DEFAULT_DATASET_DOMAIN ? host : undefined
+        const key = `${domain ?? ''}|${uid}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        out.push(domain ? {uid, domain} : {uid})
+    }
+    return out
+}
+
+// Render a ref back to a single storable/displayable token, the inverse of
+// `parseDatasetRefs` (so persisted text round-trips). Bare UID on the default
+// portal; `domain/uid` otherwise.
+export function datasetRefToken(ref: DatasetRef): string {
+    return ref.domain ? `${ref.domain}/${ref.uid}` : ref.uid
 }

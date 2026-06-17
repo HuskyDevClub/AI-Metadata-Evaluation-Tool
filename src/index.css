@@ -1336,6 +1336,18 @@ details.columns summary:hover {
     margin-bottom: 6px;
 }
 
+/* Single-dataset UID input: the field grows, "Add" sits to its right */
+.uid-add {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.uid-add input {
+    flex: 1;
+}
+
 .import-list {
     margin: 8px 0 0;
     padding-left: 18px;
@@ -1450,6 +1462,15 @@ details.columns summary:hover {
 .chip-label {
     font-family: ui-monospace, SFMono-Regular, monospace;
     color: var(--text);
+}
+
+/* Portal badge on a UID chip — shown only for non-default Socrata domains */
+.chip-domain {
+    font-size: 10px;
+    color: var(--muted);
+    background: var(--bar-track);
+    border-radius: 4px;
+    padding: 1px 5px;
 }
 
 .chip-x {

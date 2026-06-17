@@ -195,14 +195,23 @@ export interface EvalOutput {
     results?: DatasetResult[]
 }
 
+// One dataset to evaluate, by Socrata UID. `domain` is the portal host the UID
+// lives on — set when it came from a pasted dataset URL on a non-default portal;
+// omitted → the backend's default (data.wa.gov).
+export interface DatasetRef {
+    uid: string
+    domain?: string
+}
+
 // --- Run request -----------------------------------------------------------
 export interface EvalRunRequest {
     datasetLimit: number
     evalColumns: boolean
     maxColumnsPerDataset: number
     // Dataset source: explicit Socrata UIDs, or imported datasets carrying their
-    // UID + curated metadata. When both omitted, the backend uses its CSV.
-    datasetIds?: string[]
+    // UID + curated metadata. When both omitted, the backend uses its CSV. UIDs
+    // may be bare strings or {uid, domain} refs (the backend coerces strings).
+    datasetIds?: (string | DatasetRef)[]
     importedDatasets?: ImportedDataset[]
     // Which benchmark CSV file to use (filename only). When omitted the backend
     // falls back to DatasetsWithSolidMetadata.csv.
