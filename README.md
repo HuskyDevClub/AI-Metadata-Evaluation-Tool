@@ -60,7 +60,7 @@ The app deploys to Databricks Apps via GitHub Actions (build → push a `release
 
 ## Prompts (shared with the main tool)
 
-The metadata-generation prompts (`system`, `dataset`, `column`) are the same templates the main tool ships, so the eval scores the prompts that actually run in production rather than a drifting copy. The main tool exposes them at `GET /api/prompts`; set `PROMPTS_SOURCE_URL` to its base URL and the eval fetches them at the start of each run (recorded as `prompts_source` in the run metadata). This is required and has no offline fallback — if `PROMPTS_SOURCE_URL` is unset or unreachable, eval runs fail with a clear error rather than scoring a stale local copy. The judge prompts are eval-only and live in `backend/router.py`.
+The metadata-generation prompts (`system`, `dataset`, `column`) are the same templates the main tool ships, so the eval scores the prompts that actually run in production rather than a drifting copy. The main tool exposes them at `GET /api/prompts`; set `PROMPTS_SOURCE_URL` to its base URL and the eval fetches them at the start of each run (recorded as `prompts_source` in the run metadata). This is required and has no offline fallback — if `PROMPTS_SOURCE_URL` is unset or unreachable, eval runs fail with a clear error rather than scoring a stale local copy. When both apps are deployed on Databricks, the eval authenticates this cross-app call as its own service principal, which must be granted `CAN USE` on the main tool's app — see [DEPLOYMENT.md, Step 7](DEPLOYMENT.md#7-authorize-the-cross-app-prompts-fetch). The judge prompts are eval-only and live in `backend/router.py`.
 
 ## Dataset sources
 

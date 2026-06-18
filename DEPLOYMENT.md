@@ -1,9 +1,6 @@
 # Deployment Guide — Databricks Apps via Git-Linked Workspace
 
-This guide sets up **automatic deployment to your Databricks workspace** whenever
-you push to `main`. The workflow uses a dedicated `release-databricks` branch to
-store build artifacts, which is pulled into a **Databricks Git Folder (Repo)** and
-deployed to your App.
+This guide sets up **automatic deployment to your Databricks workspace** whenever you push to `main`. The workflow uses a dedicated `release-databricks` branch to store build artifacts, which is pulled into a **Databricks Git Folder (Repo)** and deployed to your App.
 
 ## How It Works
 
@@ -12,15 +9,11 @@ On every push to `main`, the workflow:
 1. Checks out the code and installs Node.js.
 2. Runs `npm install`.
 3. Writes `.env.databricks` from the `DATABRICKS_ENV_FILE` secret.
-4. Syncs each line of `.env.databricks` into a Databricks secret scope
-   (`metadata-eval-tool`) and registers app-level resources referencing those secrets.
-5. Builds the frontend (`npm run build:databricks`) with `VITE_API_BASE_URL` empty
-   so the bundle uses relative paths.
-6. Pushes the artifacts (`backend/`, `app.yaml`, and the built `backend/static/`)
-   to a **`release-databricks`** branch via **`deploy.sh`**.
+4. Syncs each line of `.env.databricks` into a Databricks secret scope (`metadata-eval-tool`) and registers app-level resources referencing those secrets.
+5. Builds the frontend (`npm run build:databricks`) with `VITE_API_BASE_URL` empty so the bundle uses relative paths.
+6. Pushes the artifacts (`backend/`, `app.yaml`, and the built `backend/static/`) to a **`release-databricks`** branch via **`deploy.sh`**.
 7. Updates the **Git Folder** in your workspace to the latest commit on that branch.
-8. Deploys the Databricks App from that workspace path. At runtime, `app.yaml`'s
-   `valueFrom` entries pull each env var from the registered secret resources.
+8. Deploys the Databricks App from that workspace path. At runtime, `app.yaml`'s `valueFrom` entries pull each env var from the registered secret resources.
 
 ## Setup (GitHub Actions CI/CD)
 
@@ -34,16 +27,12 @@ Fork this repository into your own GitHub account or organization.
 2. In the left sidebar, go to **Workspace**.
 3. Right-click your user folder and select **Create → Git folder**.
 4. Enter the URL of your forked repository.
-5. Set the **Branch** to `release-databricks`. (If it doesn't exist yet, run the
-   GitHub Action once to create it, or create it manually.)
-6. Copy the path to this folder (e.g.
-   `/Workspace/Users/you@example.com/ai-metadata-evaluation-tool`). This is your
-   `DATABRICKS_WORKSPACE_PATH`.
+5. Set the **Branch** to `release-databricks`. (If it doesn't exist yet, run the GitHub Action once to create it, or create it manually.)
+6. Copy the path to this folder (e.g. `/Workspace/Users/you@example.com/ai-metadata-evaluation-tool`). This is your `DATABRICKS_WORKSPACE_PATH`.
 
 ### 3. Create the Databricks App
 
-**Web UI:** **Compute → Apps → Create app**, choose **Custom app**, give it a name
-(e.g. `metadata-eval-tool`), finish the wizard, and copy its public URL.
+**Web UI:** **Compute → Apps → Create app**, choose **Custom app**, give it a name (e.g. `metadata-eval-tool`), finish the wizard, and copy its public URL.
 
 **CLI:** `databricks apps create metadata-eval-tool`
 
@@ -60,12 +49,7 @@ Fill in:
 - `DATABRICKS_WORKSPACE_PATH` — the path from Step 2.
 - `FRONTEND_URL` — the public app URL (used as the canonical CORS origin).
 - `LLM_ENDPOINT`, `LLM_API_KEY`, `LLM_MODEL`, `JUDGE_LLM_MODEL`, `SOCRATA_APP_TOKEN`.
-- `PROMPTS_SOURCE_URL` *(required)* — the public URL of the deployed
-  AI-Metadata-Improvement-Tool app. Each eval run fetches that app's canonical
-  prompt templates from `{PROMPTS_SOURCE_URL}/api/prompts` (a server-side,
-  backend-to-backend call — no CORS involved) so it scores the exact prompts that
-  tool ships. There is no offline fallback: if this is unset or unreachable, eval
-  runs and the Settings-drawer defaults fail with a clear error.
+- `PROMPTS_SOURCE_URL` *(required)* — the public URL of the deployed AI-Metadata-Improvement-Tool app. Each eval run fetches that app's canonical prompt templates from `{PROMPTS_SOURCE_URL}/api/prompts` (a server-side, backend-to-backend call — no CORS involved) so it scores the exact prompts that tool ships. There is no offline fallback: if this is unset or unreachable, eval runs and the Settings-drawer defaults fail with a clear error.
 
 ### 5. Add GitHub Repository Secrets
 
@@ -79,56 +63,54 @@ In **Settings → Secrets and variables → Actions**, add:
 
 ### 6. Push to `main`
 
-Any push to `main` triggers a deploy. You can also run it on demand via
-**Actions → Deploy to Databricks → Run workflow**.
+Any push to `main` triggers a deploy. You can also run it on demand via **Actions → Deploy to Databricks → Run workflow**.
+
+### 7. Authorize the cross-app prompts fetch
+
+This is required and easy to miss. Each eval run fetches the canonical prompts from the Improvement Tool at `{PROMPTS_SOURCE_URL}/api/prompts`. That app — like every Databricks App — sits behind a Databricks OAuth front door, so the Eval app calls it as **its own service principal**: at runtime it mints an OAuth token from the `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` Databricks injects, and sends it as a Bearer token. For that token to be accepted, the Eval app's service principal needs **`CAN USE`** on the Improvement Tool app. Without this grant the fetch fails with `401 Unauthorized` and eval runs return a `502`.
+
+This is a one-time grant (the service principal exists once the Eval app is created). Do it after the app is deployed:
+
+**1. Find the Eval app's service principal client id:**
+
+```bash
+databricks apps get <eval-app-name> --output json | jq -r .service_principal_client_id
+```
+
+**2. Grant it `CAN USE` on the Improvement Tool app** — use `update-permissions` (additive). Do **not** use `set-permissions`, which replaces the entire ACL and can remove existing access:
+
+```bash
+databricks apps update-permissions <improvement-app-name> \
+  --json '{"access_control_list":[{"service_principal_name":"<eval-sp-client-id>","permission_level":"CAN_USE"}]}'
+```
+
+Notes:
+- In the ACL, `service_principal_name` takes the service principal's **client-id UUID**, not its display name.
+- Grant `CAN USE` to the **Eval app's service principal**, not to your own user or a group — the token carries the service principal's identity, so the grant must be on it.
+- The grant lives on the Improvement app, so changing it does not require redeploying the Eval app — just retry the run.
+
+**UI alternative:** Compute → Apps → *Improvement Tool app* → Permissions → Add → search for the Eval app's service principal (by client id or `app-… <eval-app-name>` name) → `CAN USE` → Save.
 
 ## Troubleshooting
 
-**`Failed to resolve host metadata` / token rejection in the workflow log.**
-`DATABRICKS_HOST` is pointing at the app's `*.databricksapps.com` URL instead of
-the workspace URL. Set it to the URL you use to log into Databricks.
+**`Failed to resolve host metadata` / token rejection in the workflow log.** `DATABRICKS_HOST` is pointing at the app's `*.databricksapps.com` URL instead of the workspace URL. Set it to the URL you use to log into Databricks.
 
-**`invalid access token` / `401 Unauthorized` from the CLI.** The PAT expired, was
-revoked, or was created in a different workspace than `DATABRICKS_HOST`. Regenerate
-it inside the same workspace and update the `DATABRICKS_TOKEN` secret.
+**`invalid access token` / `401 Unauthorized` from the CLI.** The PAT expired, was revoked, or was created in a different workspace than `DATABRICKS_HOST`. Regenerate it inside the same workspace and update the `DATABRICKS_TOKEN` secret.
 
-**`app … not found` during `databricks apps deploy`.** You skipped Step 3 — the app
-must exist before the workflow can deploy to it.
+**`app … not found` during `databricks apps deploy`.** You skipped Step 3 — the app must exist before the workflow can deploy to it.
 
-**CORS errors in the browser after a successful deploy.** `FRONTEND_URL` in
-`.env.databricks` doesn't match the URL you're visiting, so the backend rejects the
-origin. Update `FRONTEND_URL` to the exact Databricks App URL and redeploy.
+**CORS errors in the browser after a successful deploy.** `FRONTEND_URL` in `.env.databricks` doesn't match the URL you're visiting, so the backend rejects the origin. Update `FRONTEND_URL` to the exact Databricks App URL and redeploy.
 
-**Deploy "succeeds" but the app shows a blank page or 404s on static assets.** The
-frontend build didn't land in the synced `backend/static/`. Check that
-`npm run build:databricks` ran cleanly and that `backend/static/index.html` shows
-up in the workspace path from Step 2.
+**Deploy "succeeds" but the app shows a blank page or 404s on static assets.** The frontend build didn't land in the synced `backend/static/`. Check that `npm run build:databricks` ran cleanly and that `backend/static/index.html` shows up in the workspace path from Step 2.
 
-**Deploy fails with "pending deployment in progress" after the app was auto-stopped.**
-`databricks apps start` itself consumes a deployment slot, so calling
-`databricks apps deploy` immediately after hits Databricks' ~20-minute per-app rate
-limit. `deploy.sh` avoids this by skipping the explicit deploy when it had to start
-the app (the Git Folder update already synced the latest commit).
+**Deploy fails with "pending deployment in progress" after the app was auto-stopped.** `databricks apps start` itself consumes a deployment slot, so calling `databricks apps deploy` immediately after hits Databricks' ~20-minute per-app rate limit. `deploy.sh` avoids this by skipping the explicit deploy when it had to start the app (the Git Folder update already synced the latest commit).
 
-**Changed a secret but CI still uses the old value.** GitHub reads secrets at the
-start of each run. Re-run the workflow after updating the secret.
+**Changed a secret but CI still uses the old value.** GitHub reads secrets at the start of each run. Re-run the workflow after updating the secret.
 
-**Eval runs fail with a 502 / "Failed to fetch canonical prompts" error.**
-The cross-app fetch of `{PROMPTS_SOURCE_URL}/api/prompts` failed, and there is no
-offline fallback by design (so the eval never scores stale prompts). Check, in order:
+**Eval runs fail with a 502 / "Failed to fetch canonical prompts" error.** The cross-app fetch of `{PROMPTS_SOURCE_URL}/api/prompts` failed, and there is no offline fallback by design (so the eval never scores stale prompts). Check, in order:
 
-1. **`PROMPTS_SOURCE_URL` points at the wrong app.** It must be the **Improvement
-   Tool's** app URL — not this Eval app's own URL. A `401` whose URL contains
-   `ai-metadata-evaluation-tool` is this mistake.
-2. **The 401/403 is the Databricks front door.** Every Databricks App is gated by
-   Databricks OAuth, so the Eval app authenticates app-to-app: it mints a Bearer
-   token from its injected service-principal credentials (`DATABRICKS_CLIENT_ID` /
-   `DATABRICKS_CLIENT_SECRET` / `DATABRICKS_HOST`, all auto-provided) and sends it on
-   the GET. For this to be accepted, **grant the Eval app's service principal
-   `CAN USE` on the Improvement Tool app** (Improvement app → Permissions). Without
-   that grant the front door returns `401`/`403` even with a valid token.
-3. **The Improvement Tool app is stopped or unreachable.** Start it and confirm it
-   serves `GET /api/prompts`.
+1. **`PROMPTS_SOURCE_URL` points at the wrong app.** It must be the **Improvement Tool's** app URL — not this Eval app's own URL. A `401` whose URL contains `ai-metadata-evaluation-tool` is this mistake.
+2. **A `401`/`403` is the Databricks front door rejecting the Eval app's service principal.** The Eval app authenticates app-to-app with a Bearer token, but that token is only accepted once the service principal has `CAN USE` on the Improvement Tool app. Complete [Step 7](#7-authorize-the-cross-app-prompts-fetch) — this is the most common cause.
+3. **The Improvement Tool app is stopped or unreachable.** Start it and confirm it serves `GET /api/prompts`.
 
-When the fetch succeeds, the run's `start`/`metadata` event records `prompts_source`
-as `"remote:https://…"`.
+When the fetch succeeds, the run's `start`/`metadata` event records `prompts_source` as `"remote:https://…"`.
