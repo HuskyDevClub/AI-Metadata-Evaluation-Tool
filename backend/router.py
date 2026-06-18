@@ -29,7 +29,7 @@ from .config import (
     SOCRATA_APP_TOKEN,
 )
 from .models import EvalRunRequest, ImportedDataset, PromptVariant, ScoringCategory
-from .prompts_source import load_prompts
+from .prompts_source import PromptSourceError, load_prompts
 from .quality_checks import quality_checks
 
 logger = logging.getLogger(__name__)
@@ -933,8 +933,11 @@ router = APIRouter()
 async def eval_defaults() -> dict[str, Any]:
     """Default prompts + judge metrics, so the Settings drawer can pre-fill its
     editors with the real templates the eval would otherwise use."""
-    async with httpx.AsyncClient() as client:
-        prompts = await load_prompts(client)
+    try:
+        async with httpx.AsyncClient() as client:
+            prompts = await load_prompts(client)
+    except PromptSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "prompts": {
             "system": prompts.system,
@@ -1013,10 +1016,14 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
             status_code=400, detail="No datasets to evaluate (empty source)."
         )
 
-    # Load the generation prompt templates once per run (canonical remote source
-    # if PROMPTS_SOURCE_URL is set, else bundled). Recorded in the metadata below.
-    async with httpx.AsyncClient() as _prompts_client:
-        prompts = await load_prompts(_prompts_client)
+    # Load the generation prompt templates once per run from the canonical remote
+    # source (PROMPTS_SOURCE_URL). No fallback — a missing/unreachable source is a
+    # hard error so the eval never scores stale prompts. Recorded in metadata below.
+    try:
+        async with httpx.AsyncClient() as _prompts_client:
+            prompts = await load_prompts(_prompts_client)
+    except PromptSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Apply per-run prompt overrides from the Settings drawer; a blank field
     # keeps the resolved default. `prompts_source` flags when anything was edited.

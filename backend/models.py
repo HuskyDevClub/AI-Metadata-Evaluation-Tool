@@ -12,7 +12,7 @@ class PromptOverrides(BaseModel):
     """Per-run generation prompt overrides, edited in the Settings drawer.
 
     Any field left blank falls back to the resolved default template (the
-    canonical PROMPTS_SOURCE_URL copy or the bundled fallback).
+    canonical copy fetched from PROMPTS_SOURCE_URL).
     """
 
     system: str | None = Field(default=None, max_length=50000)
