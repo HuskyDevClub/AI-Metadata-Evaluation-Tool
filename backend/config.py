@@ -28,6 +28,16 @@ SOCRATA_APP_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")
 # runs (and the Settings-drawer defaults) fail with a clear error.
 PROMPTS_SOURCE_URL = os.getenv("PROMPTS_SOURCE_URL", "")
 
+# --- Databricks app identity (injected at runtime by Databricks Apps) -------
+# Each deployed app runs as its own service principal; Databricks injects these
+# OAuth client-credentials so the app can authenticate as itself. The eval uses
+# them to mint a Bearer token for the Improvement Tool's auth-gated /api/prompts
+# (the calling app's SP must also have CAN USE on that app). Absent in local dev,
+# where the prompt source has no auth proxy, so no Authorization header is sent.
+DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "")
+DATABRICKS_CLIENT_ID = os.getenv("DATABRICKS_CLIENT_ID", "")
+DATABRICKS_CLIENT_SECRET = os.getenv("DATABRICKS_CLIENT_SECRET", "")
+
 # --- Server ----------------------------------------------------------------
 # Canonical allowed CORS origin. In production the frontend and backend are
 # same-origin (Databricks Apps), so no preflight fires; in dev the Vite proxy
