@@ -146,8 +146,9 @@ export type CandidateKind = 'generated' | 'existing-live' | 'existing-imported'
 
 export interface ModelEvaluation {
     // Display/grouping label for this candidate column. For generated candidates
-    // it's the model name (or `model · variant` when prompts vary); for existing
-    // metadata it's a fixed label like "data.wa.gov (live)".
+    // it's the model name (or `model · variant` when prompts vary); for live
+    // metadata it names the portal (e.g. "data.ny.gov (live)"); imported metadata
+    // uses a fixed "Imported (curated)" label.
     generator_model: string
     candidate_kind?: CandidateKind
     base_model?: string | null
@@ -160,6 +161,9 @@ export interface ModelEvaluation {
 
 export interface DatasetResult {
     dataset_id: string
+    // Portal host the dataset was loaded from (e.g. data.ny.gov). Set by new
+    // runs; omitted on legacy files → treated as the default portal.
+    domain?: string
     name?: string
     total_rows?: number
     column_count?: number

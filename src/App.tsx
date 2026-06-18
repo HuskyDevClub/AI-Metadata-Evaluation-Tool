@@ -33,21 +33,26 @@ export default function App() {
         <>
             <header>
                 <h1>Metadata Eval Viewer</h1>
+                <button
+                    type="button"
+                    className="run-btn run-go"
+                    onClick={() => setShowPanel((s) => !s)}
+                >
+                    Run new eval…
+                </button>
                 <label className="file-btn">
                     Load results…
                     <input type="file" accept=".json" hidden onChange={onFile}/>
                 </label>
-                <button type="button" className="run-btn" onClick={() => setShowPanel((s) => !s)}>
-                    Run new eval…
-                </button>
-                <button
-                    type="button"
-                    className="run-btn"
-                    disabled={!canSave}
-                    onClick={() => data && downloadJson(data)}
-                >
-                    Save results…
-                </button>
+                {canSave && (
+                    <button
+                        type="button"
+                        className="run-btn"
+                        onClick={() => data && downloadJson(data)}
+                    >
+                        Save results…
+                    </button>
+                )}
                 {data && <MetaStrip data={data}/>}
                 <button
                     type="button"

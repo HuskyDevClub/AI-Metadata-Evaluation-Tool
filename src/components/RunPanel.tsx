@@ -931,10 +931,19 @@ export function RunPanel({
                         </div>
                     )}
 
-                    {/* Max datasets / Max columns cap the benchmark CSV only — for
-                        explicit UIDs and imported files the chosen set runs in full. */}
-                    <div className="field-grid">
-                        {source === 'csv' && (
+                    {/* "Evaluate columns" is a master toggle for every source; it gates the
+                        "Max columns / dataset" cap below. The two numeric caps apply to the
+                        benchmark CSV only — explicit UIDs and imported files run in full. */}
+                    <label className="settings-field row">
+                        <input
+                            type="checkbox"
+                            checked={evalCols}
+                            onChange={(e) => setEvalCols(e.target.checked)}
+                        />
+                        Evaluate columns
+                    </label>
+                    {source === 'csv' && (
+                        <div className="cap-row">
                             <label className="settings-field">
                                 Max datasets
                                 <input
@@ -945,16 +954,6 @@ export function RunPanel({
                                     onChange={(e) => setLimit(e.target.value)}
                                 />
                             </label>
-                        )}
-                        <label className="settings-field row">
-                            <input
-                                type="checkbox"
-                                checked={evalCols}
-                                onChange={(e) => setEvalCols(e.target.checked)}
-                            />
-                            Evaluate columns
-                        </label>
-                        {source === 'csv' && (
                             <label className="settings-field">
                                 Max columns / dataset (-1 = all)
                                 <input
@@ -966,8 +965,8 @@ export function RunPanel({
                                     onChange={(e) => setMaxCols(e.target.value)}
                                 />
                             </label>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </section>
 
                 {/* --- Goal-specific ----------------------------------------- */}

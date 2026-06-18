@@ -1,3 +1,15 @@
+import type {CandidateKind} from '@/types/eval'
+import {DEFAULT_DATASET_DOMAIN} from '@/utils/runDefaults'
+
+// DescPair label for a candidate's "generated/existing" side. The live label
+// names the portal the description is published on (defaulting to the WA portal)
+// so cross-portal runs read correctly instead of always saying data.wa.gov.
+export function candidateGenLabel(kind: CandidateKind, domain?: string): string {
+    if (kind === 'existing-live') return `Live (${domain || DEFAULT_DATASET_DOMAIN})`
+    if (kind === 'existing-imported') return 'Imported (curated)'
+    return 'AI-generated'
+}
+
 export function fmtTokens(n: number): string {
     if (typeof n !== 'number' || !isFinite(n)) return '0'
     return n.toLocaleString()

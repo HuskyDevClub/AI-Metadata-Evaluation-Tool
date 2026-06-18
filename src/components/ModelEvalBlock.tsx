@@ -1,7 +1,7 @@
 import type {CandidateKind, Category, ModelEvaluation} from '@/types/eval'
 import type {UseRates} from '@/hooks/useRates'
 import {callCost, genRateKey, splitTokens} from '@/utils/pricing'
-import {fmtCost, fmtTokens} from '@/utils/format'
+import {candidateGenLabel, fmtCost, fmtTokens} from '@/utils/format'
 import {ChecksBlock} from '@/components/ChecksBlock'
 import {ColumnCard} from '@/components/ColumnCard'
 import {DescPair} from '@/components/DescPair'
@@ -9,12 +9,6 @@ import {ReasoningBlock} from '@/components/ReasoningBlock'
 import {ScoresBlock} from '@/components/ScoresBlock'
 import {WinnerBadge} from '@/components/WinnerBadge'
 
-// The "AI-generated" block label per candidate kind.
-const GEN_LABEL: Record<CandidateKind, string> = {
-    generated: 'AI-generated',
-    'existing-live': 'Live (data.wa.gov)',
-    'existing-imported': 'Imported (curated)',
-}
 const KIND_BADGE: Record<CandidateKind, string> = {
     generated: '',
     'existing-live': 'existing · live',
@@ -29,12 +23,14 @@ export function ModelEvalBlock({
                                    colCats,
                                    judgeModel,
                                    rates,
+                                   domain,
                                }: {
     me: ModelEvaluation
     dsCats: Category[]
     colCats: Category[]
     judgeModel?: string
     rates: UseRates
+    domain?: string
 }) {
     const j = me.dataset_evaluation?.judgment ?? {}
     const cols = me.column_evaluations ?? []
@@ -94,7 +90,7 @@ export function ModelEvalBlock({
                 gold={me.dataset_evaluation?.gold_description ?? undefined}
                 gen={me.dataset_evaluation?.generated_description}
                 goldLabel="Gold (live)"
-                genLabel={GEN_LABEL[kind]}
+                genLabel={candidateGenLabel(kind, domain)}
             />
             <ScoresBlock judgment={j} categories={dsCats}/>
             <ChecksBlock checks={me.dataset_evaluation?.deterministic_checks}/>
@@ -110,7 +106,7 @@ export function ModelEvalBlock({
                         )}
                     </summary>
                     {cols.map((c, i) => (
-                        <ColumnCard key={i} col={c} categories={colCats} kind={kind}/>
+                        <ColumnCard key={i} col={c} categories={colCats} kind={kind} domain={domain}/>
                     ))}
                 </details>
             )}
