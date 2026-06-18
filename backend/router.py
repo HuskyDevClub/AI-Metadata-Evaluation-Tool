@@ -63,9 +63,21 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]")
 _UNTRUSTED_OPEN = "<<<UNTRUSTED_DATA>>>"
 _UNTRUSTED_CLOSE = "<<<END_UNTRUSTED_DATA>>>"
 
-# Candidate labels for the two "existing metadata" sources (no generation).
-_LABEL_LIVE = "data.wa.gov (live)"
+# Candidate label for imported (curated) metadata. The live label is built
+# per-dataset from its portal domain (e.g. "data.ny.gov (live)") so cross-portal
+# runs name the right portal.
 _LABEL_IMPORTED = "Imported (curated)"
+
+_DEFAULT_DOMAIN = "data.wa.gov"
+
+
+def _portal_phrase(domain: str) -> str:
+    """How the judge prompt names the portal under evaluation. The WA portal keeps
+    its formal name; any other Socrata portal is named by its host so a cross-portal
+    run isn't told it's grading Washington State data."""
+    if domain == _DEFAULT_DOMAIN:
+        return "the Washington State Open Data Portal (data.wa.gov)"
+    return f"the open data portal {domain}"
 
 
 def _sanitize_untrusted(value: Any) -> str:
@@ -300,13 +312,14 @@ _ANCHOR_SCALE = (
 # --- Head-to-head judge (blinded: gold vs generated, order randomized) ------
 def _build_judge_system_prompt(
     categories: list[dict[str, Any]],
+    domain: str = _DEFAULT_DOMAIN,
 ) -> str:
     bullets = "\n".join(
         f"{i + 1}. {c['label'].upper()} ({c['min']}-{c['max']}) - {c['description']}"
         for i, c in enumerate(categories)
     )
     return (
-        "You are an expert evaluator assessing metadata descriptions for the Washington State Open Data Portal (data.wa.gov).\n"
+        f"You are an expert evaluator assessing metadata descriptions for {_portal_phrase(domain)}.\n"
         "You will compare 2 candidate descriptions (Candidate 1 and Candidate 2) and score EACH candidate independently on the following metrics. "
         "You are NOT told which candidate came from which source — judge purely on the quality of the text itself:\n\n"
         f"{bullets}\n\n"
@@ -362,13 +375,14 @@ def _build_judge_schema(
 # --- Absolute judge (score one description on its own, no comparison) -------
 def _build_absolute_judge_system_prompt(
     categories: list[dict[str, Any]],
+    domain: str = _DEFAULT_DOMAIN,
 ) -> str:
     bullets = "\n".join(
         f"{i + 1}. {c['label'].upper()} ({c['min']}-{c['max']}) - {c['description']}"
         for i, c in enumerate(categories)
     )
     return (
-        "You are an expert evaluator assessing a single metadata description for the Washington State Open Data Portal (data.wa.gov).\n"
+        f"You are an expert evaluator assessing a single metadata description for {_portal_phrase(domain)}.\n"
         "Score the description independently on each of the following metrics:\n\n"
         f"{bullets}\n\n"
         f"{_ANCHOR_SCALE}\n\n"
@@ -685,6 +699,7 @@ async def _judge(
     categories: list[dict[str, Any]],
     model: str,
     *,
+    domain: str = _DEFAULT_DOMAIN,
     samples: int = 1,
     randomize: bool = True,
 ) -> tuple[dict[str, Any], dict[str, int]]:
@@ -694,7 +709,7 @@ async def _judge(
     remapped back to candidate1 = gold, candidate2 = generated, so the rest of
     the pipeline and the UI are unaffected. With `samples` > 1, scores are the
     per-category median and the winner is a majority vote."""
-    system_prompt = _build_judge_system_prompt(categories)
+    system_prompt = _build_judge_system_prompt(categories, domain)
     schema = _build_judge_schema(categories)
     base_seed = _stable_int(gold, generated)
     base_flip = randomize and (base_seed % 2 == 1)
@@ -756,13 +771,14 @@ async def _judge_absolute(
     categories: list[dict[str, Any]],
     model: str,
     *,
+    domain: str = _DEFAULT_DOMAIN,
     samples: int = 1,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Score a single description on its own. Returns a judgment with only
     `candidate2` populated (the scored description) — no gold, no winner — so the
     same renderers can display it. With `samples` > 1, scores are the per-category
     median across draws."""
-    system_prompt = _build_absolute_judge_system_prompt(categories)
+    system_prompt = _build_absolute_judge_system_prompt(categories, domain)
     user_prompt = _build_absolute_judge_user_prompt(context, candidate)
     schema = _build_absolute_judge_schema(categories)
     base_seed = _stable_int(candidate)
@@ -1130,7 +1146,13 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                         )
                     except Exception as exc:
                         err = f"fetch failed: {exc}"
-                        results.append({"dataset_id": descriptor.uid, "error": err})
+                        results.append(
+                            {
+                                "dataset_id": descriptor.uid,
+                                "domain": descriptor.domain,
+                                "error": err,
+                            }
+                        )
                         yield line(
                             {
                                 "type": "dataset_done",
@@ -1152,7 +1174,11 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                     # Build the candidate list for this dataset.
                     specs: list[CandidateSpec] = []
                     if request.evaluateLive and live_gold:
-                        specs.append(CandidateSpec("existing-live", _LABEL_LIVE))
+                        specs.append(
+                            CandidateSpec(
+                                "existing-live", f"{descriptor.domain} (live)"
+                            )
+                        )
                     if request.evaluateImported and imported_desc:
                         specs.append(
                             CandidateSpec("existing-imported", _LABEL_IMPORTED)
@@ -1183,6 +1209,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                         results.append(
                             {
                                 "dataset_id": descriptor.uid,
+                                "domain": descriptor.domain,
                                 "name": ds["name"],
                                 "error": (
                                     "no candidate to evaluate (missing live/imported "
@@ -1259,6 +1286,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                 candidate_desc,
                                 dataset_categories,
                                 judge_model,
+                                domain=descriptor.domain,
                                 samples=request.judgeSamples,
                                 randomize=request.randomizeJudgeOrder,
                             )
@@ -1270,6 +1298,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                 candidate_desc,
                                 dataset_categories,
                                 judge_model,
+                                domain=descriptor.domain,
                                 samples=request.judgeSamples,
                             )
                             gold_out = None
@@ -1395,6 +1424,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                         col_text,
                                         column_categories,
                                         judge_model,
+                                        domain=descriptor.domain,
                                         samples=request.judgeSamples,
                                         randomize=request.randomizeJudgeOrder,
                                     )
@@ -1409,6 +1439,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
                                         col_text,
                                         column_categories,
                                         judge_model,
+                                        domain=descriptor.domain,
                                         samples=request.judgeSamples,
                                     )
                                     col_gold_out = None
@@ -1473,6 +1504,7 @@ async def eval_run(request: EvalRunRequest, http_request: Request) -> StreamingR
 
                     result = {
                         "dataset_id": descriptor.uid,
+                        "domain": descriptor.domain,
                         "name": ds["name"],
                         "total_rows": ds["total_rows"],
                         "column_count": len(ds["columns"]),
