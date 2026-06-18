@@ -115,12 +115,20 @@ start of each run. Re-run the workflow after updating the secret.
 
 **Eval runs fail with a 502 / "Failed to fetch canonical prompts" error.**
 The cross-app fetch of `{PROMPTS_SOURCE_URL}/api/prompts` failed, and there is no
-offline fallback by design (so the eval never scores stale prompts). Causes, in order
-of likelihood: `PROMPTS_SOURCE_URL` is unset or wrong; the Improvement Tool app is
-stopped/unreachable; or — the common deployed case — **Databricks Apps platform
-authentication** in front of the Improvement Tool app redirects the Eval Tool's
-unauthenticated backend-to-backend GET to a login page or 401s it. Confirm
-`PROMPTS_SOURCE_URL` points at the Improvement app's public URL, that the app is
-running, and that its access settings allow the Eval app (or its service principal) to
-reach `/api/prompts`. When the fetch succeeds, the run's `start`/`metadata` event
-records `prompts_source` as `"remote:https://…"`.
+offline fallback by design (so the eval never scores stale prompts). Check, in order:
+
+1. **`PROMPTS_SOURCE_URL` points at the wrong app.** It must be the **Improvement
+   Tool's** app URL — not this Eval app's own URL. A `401` whose URL contains
+   `ai-metadata-evaluation-tool` is this mistake.
+2. **The 401/403 is the Databricks front door.** Every Databricks App is gated by
+   Databricks OAuth, so the Eval app authenticates app-to-app: it mints a Bearer
+   token from its injected service-principal credentials (`DATABRICKS_CLIENT_ID` /
+   `DATABRICKS_CLIENT_SECRET` / `DATABRICKS_HOST`, all auto-provided) and sends it on
+   the GET. For this to be accepted, **grant the Eval app's service principal
+   `CAN USE` on the Improvement Tool app** (Improvement app → Permissions). Without
+   that grant the front door returns `401`/`403` even with a valid token.
+3. **The Improvement Tool app is stopped or unreachable.** Start it and confirm it
+   serves `GET /api/prompts`.
+
+When the fetch succeeds, the run's `start`/`metadata` event records `prompts_source`
+as `"remote:https://…"`.

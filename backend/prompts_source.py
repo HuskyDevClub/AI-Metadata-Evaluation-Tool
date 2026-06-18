@@ -3,7 +3,12 @@ from dataclasses import dataclass
 
 import httpx
 
-from .config import PROMPTS_SOURCE_URL
+from .config import (
+    DATABRICKS_CLIENT_ID,
+    DATABRICKS_CLIENT_SECRET,
+    DATABRICKS_HOST,
+    PROMPTS_SOURCE_URL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,30 @@ def _normalize(raw: str) -> str:
     return raw.replace("\r\n", "\n").rstrip("\n")
 
 
+async def _databricks_auth_headers(client: httpx.AsyncClient) -> dict[str, str]:
+    """Mint an OAuth machine-to-machine Bearer token from this app's injected
+    service-principal credentials, so the cross-app GET passes the target app's
+    Databricks front door (which 401s unauthenticated requests).
+
+    Returns {} when the credentials aren't present (local dev), where the prompt
+    source has no auth proxy and an Authorization header isn't needed.
+    """
+    host = DATABRICKS_HOST.strip().rstrip("/")
+    if not (host and DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET):
+        return {}
+    if not host.startswith("http"):
+        host = f"https://{host}"
+    resp = await client.post(
+        f"{host}/oidc/v1/token",
+        auth=(DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET),
+        data={"grant_type": "client_credentials", "scope": "all-apis"},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    token = (resp.json().get("access_token") or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 async def load_prompts(client: httpx.AsyncClient) -> Prompts:
     """Fetch the canonical generation prompt templates from the main tool.
 
@@ -52,9 +81,21 @@ async def load_prompts(client: httpx.AsyncClient) -> Prompts:
             "prompts from {url}/api/prompts."
         )
     try:
-        resp = await client.get(f"{url}/api/prompts", timeout=10.0)
+        headers = await _databricks_auth_headers(client)
+        resp = await client.get(f"{url}/api/prompts", headers=headers, timeout=10.0)
         resp.raise_for_status()
         served = resp.json().get("prompts", {})
+    except httpx.HTTPStatusError as exc:
+        hint = ""
+        if exc.response.status_code in (401, 403):
+            hint = (
+                " — the Databricks front door rejected the request. Check that "
+                "PROMPTS_SOURCE_URL points at the Improvement Tool (not this app) "
+                "and that this app's service principal has CAN USE on it."
+            )
+        raise PromptSourceError(
+            f"Failed to fetch canonical prompts from {url}/api/prompts: {exc}{hint}"
+        ) from exc
     except Exception as exc:
         raise PromptSourceError(
             f"Failed to fetch canonical prompts from {url}/api/prompts: {exc}"
