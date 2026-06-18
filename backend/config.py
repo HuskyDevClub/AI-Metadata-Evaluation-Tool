@@ -22,9 +22,10 @@ SOCRATA_APP_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")
 
 # --- Prompts ---------------------------------------------------------------
 # Base URL of the AI-Metadata-Improvement-Tool backend (e.g. its Databricks App
-# URL). When set, the eval fetches the canonical prompt templates from
+# URL). REQUIRED: the eval fetches the canonical prompt templates from
 # {PROMPTS_SOURCE_URL}/api/prompts so it scores the exact prompts that tool
-# ships. When empty (the default) it uses the bundled copies in backend/prompts.
+# ships. There is no bundled fallback — if this is unset or unreachable, eval
+# runs (and the Settings-drawer defaults) fail with a clear error.
 PROMPTS_SOURCE_URL = os.getenv("PROMPTS_SOURCE_URL", "")
 
 # --- Server ----------------------------------------------------------------

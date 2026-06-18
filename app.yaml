@@ -22,7 +22,5 @@ env:
     valueFrom: socrata-app-token
   - name: FRONTEND_URL
     valueFrom: frontend-url
-  # Optional: fetch the canonical prompt templates live from the main tool so the
-  # eval scores the exact shipping prompts. Leave unset to use the bundled copies.
-  # - name: PROMPTS_SOURCE_URL
-  #   value: "https://your-main-tool-app-url"
+  - name: PROMPTS_SOURCE_URL
+    valueFrom: prompts-source-url

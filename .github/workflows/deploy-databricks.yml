@@ -60,7 +60,8 @@ jobs:
             {name:"llm-model",         secret:{scope:"metadata-eval-tool", key:"LLM_MODEL",         permission:"READ"}},
             {name:"judge-llm-model",   secret:{scope:"metadata-eval-tool", key:"JUDGE_LLM_MODEL",   permission:"READ"}},
             {name:"socrata-app-token", secret:{scope:"metadata-eval-tool", key:"SOCRATA_APP_TOKEN", permission:"READ"}},
-            {name:"frontend-url",      secret:{scope:"metadata-eval-tool", key:"FRONTEND_URL",      permission:"READ"}}
+            {name:"frontend-url",      secret:{scope:"metadata-eval-tool", key:"FRONTEND_URL",      permission:"READ"}},
+            {name:"prompts-source-url",secret:{scope:"metadata-eval-tool", key:"PROMPTS_SOURCE_URL",permission:"READ"}}
           ]')
           databricks apps update "$APP_NAME" --json "{\"resources\": $RESOURCES}"
 

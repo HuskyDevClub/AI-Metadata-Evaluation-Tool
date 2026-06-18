@@ -60,6 +60,12 @@ Fill in:
 - `DATABRICKS_WORKSPACE_PATH` — the path from Step 2.
 - `FRONTEND_URL` — the public app URL (used as the canonical CORS origin).
 - `LLM_ENDPOINT`, `LLM_API_KEY`, `LLM_MODEL`, `JUDGE_LLM_MODEL`, `SOCRATA_APP_TOKEN`.
+- `PROMPTS_SOURCE_URL` *(required)* — the public URL of the deployed
+  AI-Metadata-Improvement-Tool app. Each eval run fetches that app's canonical
+  prompt templates from `{PROMPTS_SOURCE_URL}/api/prompts` (a server-side,
+  backend-to-backend call — no CORS involved) so it scores the exact prompts that
+  tool ships. There is no offline fallback: if this is unset or unreachable, eval
+  runs and the Settings-drawer defaults fail with a clear error.
 
 ### 5. Add GitHub Repository Secrets
 
@@ -106,3 +112,15 @@ the app (the Git Folder update already synced the latest commit).
 
 **Changed a secret but CI still uses the old value.** GitHub reads secrets at the
 start of each run. Re-run the workflow after updating the secret.
+
+**Eval runs fail with a 502 / "Failed to fetch canonical prompts" error.**
+The cross-app fetch of `{PROMPTS_SOURCE_URL}/api/prompts` failed, and there is no
+offline fallback by design (so the eval never scores stale prompts). Causes, in order
+of likelihood: `PROMPTS_SOURCE_URL` is unset or wrong; the Improvement Tool app is
+stopped/unreachable; or — the common deployed case — **Databricks Apps platform
+authentication** in front of the Improvement Tool app redirects the Eval Tool's
+unauthenticated backend-to-backend GET to a login page or 401s it. Confirm
+`PROMPTS_SOURCE_URL` points at the Improvement app's public URL, that the app is
+running, and that its access settings allow the Eval app (or its service principal) to
+reach `/api/prompts`. When the fetch succeeds, the run's `start`/`metadata` event
+records `prompts_source` as `"remote:https://…"`.
